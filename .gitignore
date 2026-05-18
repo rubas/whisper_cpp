@@ -1,0 +1,27 @@
+# Mix
+/_build/
+/cover/
+/deps/
+/doc/
+/tmp/
+erl_crash.dump
+*.ez
+
+# Hex tarball
+whisper_cpp-*.tar
+
+# Rust native artifacts
+native/*/target/
+priv/native/
+
+# Test fixtures - models and audio downloaded on demand
+test/fixtures/*
+
+# Local caches
+.cargo-home/
+.hex-home/
+.mix-home/
+
+# Editor / agent
+.claude/
+.jj/

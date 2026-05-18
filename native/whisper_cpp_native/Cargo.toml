@@ -1,0 +1,60 @@
+[package]
+name = "whisper_cpp_native"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+
+[lib]
+name = "whisper_cpp_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.37.4"
+# `whisper-rs` is the canonical Rust binding to whisper.cpp. It vendors
+# whisper.cpp under `sys/whisper.cpp/` and exposes cargo features that
+# toggle the upstream CMake build flags.
+whisper-rs = { version = "0.16.0", default-features = false }
+parking_lot = "0.12.5"
+anyhow = "1.0.102"
+
+[features]
+# Pick exactly one acceleration backend per build. CPU is always
+# available; the GPU features are mutually exclusive at runtime.
+#
+#   WHISPER_CPP_FEATURES=cuda       NVIDIA CUDA (Linux/Windows x86_64, aarch64)
+#   WHISPER_CPP_FEATURES=hipblas    AMD ROCm via hipBLAS (Linux x86_64)
+#   WHISPER_CPP_FEATURES=vulkan     Cross-vendor Vulkan
+#   WHISPER_CPP_FEATURES=metal      Apple Silicon GPU
+#   WHISPER_CPP_FEATURES=coreml     Apple Neural Engine (encoder)
+#   WHISPER_CPP_FEATURES=intel-sycl Intel Arc / Xe via oneAPI SYCL
+#   WHISPER_CPP_FEATURES=openblas   CPU SGEMM acceleration
+#   WHISPER_CPP_FEATURES=openmp     Multi-thread CPU via OpenMP
+#
+# Bare `mix compile` builds the pure-CPU artefact (whisper.cpp's built-in
+# fp16 SIMD on x86_64 / NEON on aarch64).
+default = []
+cuda = ["whisper-rs/cuda"]
+hipblas = ["whisper-rs/hipblas"]
+vulkan = ["whisper-rs/vulkan"]
+metal = ["whisper-rs/metal"]
+coreml = ["whisper-rs/coreml"]
+intel-sycl = ["whisper-rs/intel-sycl"]
+openblas = ["whisper-rs/openblas"]
+openmp = ["whisper-rs/openmp"]
+
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+unreachable_pub = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+doc_markdown = "allow"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

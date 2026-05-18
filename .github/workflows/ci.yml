@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MIX_ENV: test
+  ELIXIR_VERSION: "1.18.4"
+  OTP_VERSION: "27.3"
+  RUST_TOOLCHAIN: "1.85.0"
+
+jobs:
+  check:
+    name: Elixir + Rust verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Shared build env
+        uses: ./.github/actions/setup
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+          rust-toolchain: ${{ env.RUST_TOOLCHAIN }}
+          rust-components: "rustfmt, clippy"
+
+      - name: Run full check (Elixir + Rust)
+        run: task check
+
+      - name: Verify Hex tarball builds
+        run: mix hex.build

@@ -1,0 +1,232 @@
+defmodule WhisperCppTest do
+  use ExUnit.Case, async: true
+
+  alias WhisperCpp.Error
+
+  doctest WhisperCpp
+
+  describe "load_model/2 validation" do
+    test "rejects non-string paths" do
+      assert {:error, %Error{reason: :invalid_request}} = WhisperCpp.load_model(123)
+    end
+
+    test "rejects empty paths" do
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.load_model("   ")
+
+      assert msg =~ "non-empty"
+    end
+
+    test "rejects unknown options" do
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.load_model("/tmp/whatever.bin", made_up: true)
+
+      assert msg =~ "unknown option"
+    end
+
+    test "rejects invalid device" do
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.load_model("/tmp/whatever.bin", device: :tpu)
+    end
+  end
+
+  describe "transcribe/3 validation" do
+    test "rejects non-model first argument" do
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe(%{not: :a_model}, "/tmp/audio.wav")
+    end
+
+    test "rejects audio with wrong byte alignment" do
+      fake_model = %WhisperCpp.Model{
+        ref: make_ref(),
+        path: "fake",
+        sampling_rate: 16_000,
+        multilingual: false,
+        n_vocab: 51_864,
+        device: :cpu
+      }
+
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.transcribe(fake_model, {:pcm_f32, <<1, 2, 3>>})
+
+      assert msg =~ "multiple of 4"
+    end
+
+    test "rejects empty PCM" do
+      fake_model = %WhisperCpp.Model{
+        ref: make_ref(),
+        path: "fake",
+        sampling_rate: 16_000,
+        multilingual: false,
+        n_vocab: 51_864,
+        device: :cpu
+      }
+
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.transcribe(fake_model, {:pcm_f32, <<>>})
+
+      assert msg =~ "empty"
+    end
+
+    test "rejects unknown options" do
+      fake_model = %WhisperCpp.Model{
+        ref: make_ref(),
+        path: "fake",
+        sampling_rate: 16_000,
+        multilingual: false,
+        n_vocab: 51_864,
+        device: :cpu
+      }
+
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe(fake_model, {:pcm_f32, <<0, 0, 0, 0>>}, made_up: true)
+    end
+
+    test "rejects bare binary input (typo'd path protection)" do
+      fake_model = %WhisperCpp.Model{
+        ref: make_ref(),
+        path: "fake",
+        sampling_rate: 16_000,
+        multilingual: false,
+        n_vocab: 51_864,
+        device: :cpu
+      }
+
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.transcribe(fake_model, <<1, 2, 3, 4>>)
+
+      assert msg =~ ".wav path or"
+    end
+
+    test "rejects non-existent .wav path" do
+      fake_model = %WhisperCpp.Model{
+        ref: make_ref(),
+        path: "fake",
+        sampling_rate: 16_000,
+        multilingual: false,
+        n_vocab: 51_864,
+        device: :cpu
+      }
+
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.transcribe(fake_model, "/nonexistent/audio.wav")
+
+      assert msg =~ "does not exist"
+    end
+
+    test "rejects non-wav file extension" do
+      fake_model = %WhisperCpp.Model{
+        ref: make_ref(),
+        path: "fake",
+        sampling_rate: 16_000,
+        multilingual: false,
+        n_vocab: 51_864,
+        device: :cpu
+      }
+
+      tmp = Path.join(System.tmp_dir!(), "whisper_cpp_test_#{:rand.uniform(1_000_000)}.mp3")
+      File.write!(tmp, "garbage")
+      on_exit(fn -> File.rm(tmp) end)
+
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.transcribe(fake_model, tmp)
+
+      assert msg =~ "only .wav"
+    end
+  end
+
+  describe "transcribe_slice/4" do
+    setup do
+      {:ok,
+       model: %WhisperCpp.Model{
+         ref: make_ref(),
+         path: "fake",
+         sampling_rate: 16_000,
+         multilingual: false,
+         n_vocab: 51_864,
+         device: :cpu
+       },
+       samples: :binary.copy(<<0::little-float-32>>, 16_000 * 5)}
+    end
+
+    test "returns empty transcription for slices under 0.3 s", %{model: m, samples: s} do
+      assert {:ok, %WhisperCpp.Transcription{text: "", segments: [], duration_s: dur}} =
+               WhisperCpp.transcribe_slice(m, s, {0.0, 0.1})
+
+      assert_in_delta dur, 0.1, 1.0e-6
+    end
+
+    test "rejects negative start", %{model: m, samples: s} do
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe_slice(m, s, {-1.0, 2.0})
+    end
+
+    test "propagates slice-bounds errors from Pcm.slice", %{model: m, samples: s} do
+      # samples = 5 seconds; ask for [4.5, 7.0) which extends past the
+      # buffer. Verifies the Pcm.slice -> transcribe_slice handoff.
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.transcribe_slice(m, s, {4.5, 7.0})
+
+      assert msg =~ "past the end"
+    end
+  end
+
+  describe "build_transcription/2" do
+    test "concatenates segments and trims" do
+      payload = %{
+        language: "en",
+        duration_s: 1.5,
+        segments: [
+          %{
+            text: "Hello",
+            start: 0.0,
+            end: 0.5,
+            no_speech_prob: 0.1,
+            avg_logprob: -0.3,
+            tokens: [1, 2],
+            words: nil
+          },
+          %{
+            text: "world",
+            start: 0.6,
+            end: 1.2,
+            no_speech_prob: 0.1,
+            avg_logprob: -0.4,
+            tokens: [3, 4],
+            words: nil
+          }
+        ]
+      }
+
+      transcription = WhisperCpp.build_transcription(payload, 0.0)
+      assert transcription.text == "Hello world"
+      assert transcription.language == "en"
+      assert length(transcription.segments) == 2
+    end
+
+    test "shifts timestamps by offset" do
+      payload = %{
+        language: "en",
+        duration_s: 1.0,
+        segments: [
+          %{
+            text: "hi",
+            start: 0.1,
+            end: 0.5,
+            no_speech_prob: 0.0,
+            avg_logprob: -0.2,
+            tokens: [1],
+            words: [%{text: "hi", start: 0.1, end: 0.5, probability: 0.9}]
+          }
+        ]
+      }
+
+      transcription = WhisperCpp.build_transcription(payload, 5.0)
+      [seg] = transcription.segments
+      assert_in_delta seg.start, 5.1, 1.0e-6
+      assert_in_delta seg.end, 5.5, 1.0e-6
+      [w] = seg.words
+      assert_in_delta w.start, 5.1, 1.0e-6
+    end
+  end
+end
