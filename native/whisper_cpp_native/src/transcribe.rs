@@ -2,10 +2,11 @@
 //! `whisper-rs` 0.16. Owns the decoding strategy, parameter setting,
 //! and segment/word collection.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 
-use crate::errors::{inference_error, ErrorContext as _};
+use crate::errors::{ErrorContext as _, inference_error};
 use parking_lot::Mutex;
 use rustler::{Encoder, LocalPid, OwnedEnv};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperState};
@@ -121,6 +122,15 @@ fn build_params<'a>(req: &'a TranscribeRequest) -> FullParams<'a, 'a> {
 /// Wire optional cooperative-cancellation and progress callbacks onto
 /// the `FullParams`. Both hooks are no-ops when the caller omits them,
 /// so existing callsites pay nothing.
+///
+/// Progress messages cannot be sent directly from the callback: the
+/// callback fires on the dirty-CPU scheduler thread, and
+/// `OwnedEnv::send_and_clear` panics from there. Instead we spawn a
+/// dedicated sender thread per call that owns an `OwnedEnv` and reads
+/// percentages off an `mpsc` channel; the callback only forwards new
+/// values down the channel. When `FullParams` drops at the end of
+/// inference the `Sender` it captured drops, the channel closes, and
+/// the sender thread exits cleanly.
 fn install_callbacks(
     params: &mut FullParams<'_, '_>,
     abort_flag: Option<Arc<AtomicBool>>,
@@ -130,23 +140,26 @@ fn install_callbacks(
         params.set_abort_callback_safe(move || flag.load(Ordering::SeqCst));
     }
     if let Some(pid) = progress_pid {
-        // whisper.cpp emits frequent identical progress percentages;
-        // dedupe so the BEAM mailbox only sees changes.
+        let (tx, rx) = mpsc::channel::<i32>();
+        std::thread::spawn(move || {
+            while let Ok(pct) = rx.recv() {
+                let mut owned = OwnedEnv::new();
+                let _ = owned.send_and_clear(&pid, |env| {
+                    let tag = rustler::Atom::from_str(env, "whisper_progress")
+                        .expect("atom name is valid");
+                    (tag, pct).encode(env)
+                });
+            }
+        });
+
         let mut last: i32 = -1;
         params.set_progress_callback_safe(move |pct: i32| {
             if pct == last {
                 return;
             }
             last = pct;
-            let mut owned = OwnedEnv::new();
-            let _ = owned.send_and_clear(&pid, |env| {
-                (
-                    rustler::types::atom::Atom::from_str(env, "whisper_progress")
-                        .unwrap_or_else(|_| rustler::types::atom::ok()),
-                    pct,
-                )
-                    .encode(env)
-            });
+            // Receiver thread has exited if this errors; nothing to do.
+            let _ = tx.send(pct);
         });
     }
 }

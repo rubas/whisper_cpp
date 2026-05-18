@@ -59,13 +59,41 @@ defmodule WhisperCpp.Native do
   Runs whisper.cpp on a buffer of PCM samples.
 
   `samples_bin` is a binary of little-endian `f32` mono samples at 16 kHz.
-  Returns a structured transcription map.
+  `abort_handle` is either `nil` or an opaque resource minted by
+  `new_abort_handle/0`; signalling it from another process cancels
+  in-flight inference. `progress_pid` is `nil` or a pid that receives
+  `{:whisper_progress, percent}` messages as work advances.
   """
-  @spec transcribe(reference(), binary(), map()) :: {:ok, map()} | {:error, map()}
-  def transcribe(model, samples_bin, opts), do: nif_transcribe(model, samples_bin, opts)
+  @spec transcribe(reference(), binary(), map(), reference() | nil, pid() | nil) ::
+          {:ok, map()} | {:error, map()}
+  def transcribe(model, samples_bin, opts, abort_handle, progress_pid),
+    do: nif_transcribe(model, samples_bin, opts, abort_handle, progress_pid)
+
+  @doc "Mints a fresh cooperative-cancellation handle."
+  @spec new_abort_handle() :: reference()
+  def new_abort_handle, do: nif_new_abort_handle()
+
+  @doc "Signals an abort handle; in-flight transcribes observing it return early."
+  @spec abort_handle_signal(reference()) :: :ok
+  def abort_handle_signal(handle), do: nif_abort_handle_signal(handle)
+
+  @doc "Returns `true` once an abort handle has been signalled."
+  @spec abort_handle_aborted?(reference()) :: boolean()
+  def abort_handle_aborted?(handle), do: nif_abort_handle_aborted(handle)
+
+  @doc "Decodes WAV bytes into little-endian f32 mono PCM at 16 kHz."
+  @spec decode_wav(binary()) :: {:ok, binary()} | {:error, map()}
+  def decode_wav(bytes), do: nif_decode_wav(bytes)
 
   defp nif_available_devices, do: :erlang.nif_error(:nif_not_loaded)
   defp nif_load_model(_path, _opts), do: :erlang.nif_error(:nif_not_loaded)
   defp nif_model_info(_model), do: :erlang.nif_error(:nif_not_loaded)
-  defp nif_transcribe(_model, _samples_bin, _opts), do: :erlang.nif_error(:nif_not_loaded)
+
+  defp nif_transcribe(_model, _samples_bin, _opts, _abort_handle, _progress_pid),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  defp nif_new_abort_handle, do: :erlang.nif_error(:nif_not_loaded)
+  defp nif_abort_handle_signal(_handle), do: :erlang.nif_error(:nif_not_loaded)
+  defp nif_abort_handle_aborted(_handle), do: :erlang.nif_error(:nif_not_loaded)
+  defp nif_decode_wav(_bytes), do: :erlang.nif_error(:nif_not_loaded)
 end
