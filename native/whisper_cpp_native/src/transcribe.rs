@@ -2,8 +2,12 @@
 //! `whisper-rs` 0.16. Owns the decoding strategy, parameter setting,
 //! and segment/word collection.
 
-use crate::errors::{ErrorContext as _, inference_error};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+use crate::errors::{inference_error, ErrorContext as _};
 use parking_lot::Mutex;
+use rustler::{Encoder, LocalPid, OwnedEnv};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperState};
 
 /// Per-call decoding request decoded from the Elixir-side `TranscribeOpts`.
@@ -114,6 +118,39 @@ fn build_params<'a>(req: &'a TranscribeRequest) -> FullParams<'a, 'a> {
     params
 }
 
+/// Wire optional cooperative-cancellation and progress callbacks onto
+/// the `FullParams`. Both hooks are no-ops when the caller omits them,
+/// so existing callsites pay nothing.
+fn install_callbacks(
+    params: &mut FullParams<'_, '_>,
+    abort_flag: Option<Arc<AtomicBool>>,
+    progress_pid: Option<LocalPid>,
+) {
+    if let Some(flag) = abort_flag {
+        params.set_abort_callback_safe(move || flag.load(Ordering::SeqCst));
+    }
+    if let Some(pid) = progress_pid {
+        // whisper.cpp emits frequent identical progress percentages;
+        // dedupe so the BEAM mailbox only sees changes.
+        let mut last: i32 = -1;
+        params.set_progress_callback_safe(move |pct: i32| {
+            if pct == last {
+                return;
+            }
+            last = pct;
+            let mut owned = OwnedEnv::new();
+            let _ = owned.send_and_clear(&pid, |env| {
+                (
+                    rustler::types::atom::Atom::from_str(env, "whisper_progress")
+                        .unwrap_or_else(|_| rustler::types::atom::ok()),
+                    pct,
+                )
+                    .encode(env)
+            });
+        });
+    }
+}
+
 /// Transcribe a single PCM buffer. We hold the context mutex only long
 /// enough to call `create_state()` and then drop it; `WhisperState`
 /// carries its own `Arc<WhisperInnerContext>` so inference proceeds
@@ -123,6 +160,8 @@ pub fn transcribe_one(
     ctx: &Mutex<WhisperContext>,
     samples: &[f32],
     request: &TranscribeRequest,
+    abort_flag: Option<Arc<AtomicBool>>,
+    progress_pid: Option<LocalPid>,
 ) -> anyhow::Result<TranscriptionResult> {
     let mut state: WhisperState = {
         let ctx_guard = ctx.lock();
@@ -131,7 +170,8 @@ pub fn transcribe_one(
             .inference_error_ctx("failed to create whisper state")?
     };
 
-    let params = build_params(request);
+    let mut params = build_params(request);
+    install_callbacks(&mut params, abort_flag, progress_pid);
 
     state
         .full(params, samples)

@@ -19,15 +19,18 @@ defmodule WhisperCpp.PcmTest do
     end
 
     test "rejects negative start_s" do
+      one_second = samples(1)
+
       assert {:error, %Error{reason: :invalid_request, message: msg}} =
-               Pcm.slice(samples(1), 16_000, -0.1, 0.5)
+               Pcm.slice(one_second, 16_000, -0.1, 0.5)
 
       assert msg =~ ">= 0"
     end
 
     test "rejects non-positive duration" do
-      assert {:error, %Error{reason: :invalid_request}} = Pcm.slice(samples(1), 16_000, 0.0, 0)
-      assert {:error, %Error{reason: :invalid_request}} = Pcm.slice(samples(1), 16_000, 0.0, -1.0)
+      one_second = samples(1)
+      assert {:error, %Error{reason: :invalid_request}} = Pcm.slice(one_second, 16_000, 0.0, 0)
+      assert {:error, %Error{reason: :invalid_request}} = Pcm.slice(one_second, 16_000, 0.0, -1.0)
     end
 
     test "rejects misaligned binary length" do
@@ -38,15 +41,17 @@ defmodule WhisperCpp.PcmTest do
     end
 
     test "rejects request past buffer end" do
+      one_second = samples(1)
+
       assert {:error, %Error{reason: :invalid_request, message: msg}} =
-               Pcm.slice(samples(1), 16_000, 0.0, 2.0)
+               Pcm.slice(one_second, 16_000, 0.0, 2.0)
 
       assert msg =~ "past the end"
     end
 
     test "rejects start past buffer end" do
-      assert {:error, %Error{reason: :invalid_request}} =
-               Pcm.slice(samples(1), 16_000, 5.0, 0.1)
+      one_second = samples(1)
+      assert {:error, %Error{reason: :invalid_request}} = Pcm.slice(one_second, 16_000, 5.0, 0.1)
     end
 
     test "rejects bad argument shapes" do
@@ -57,7 +62,8 @@ defmodule WhisperCpp.PcmTest do
 
   describe "duration_s/2" do
     test "computes seconds from byte size" do
-      assert Pcm.duration_s(samples(2), 16_000) == 2.0
+      two_seconds = samples(2)
+      assert Pcm.duration_s(two_seconds, 16_000) == 2.0
       assert Pcm.duration_s(<<>>, 16_000) == 0.0
     end
   end

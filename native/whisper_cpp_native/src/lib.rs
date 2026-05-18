@@ -7,16 +7,19 @@
 #![deny(unsafe_code)]
 
 use std::collections::HashMap;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use parking_lot::Mutex;
-use rustler::types::binary::Binary;
-use rustler::{Encoder, Env, NifMap, ResourceArc, Term};
+use rustler::types::binary::{Binary, OwnedBinary};
+use rustler::{Encoder, Env, LocalPid, NifMap, OwnedEnv, ResourceArc, Term};
 use whisper_rs::{WhisperContext, WhisperContextParameters};
 
 mod errors;
 mod transcribe;
+mod wav;
 
 use errors::kind_from_chain;
 use transcribe::{SegmentResult, TranscribeRequest, TranscriptionResult, WordResult};
@@ -77,9 +80,9 @@ impl From<anyhow::Error> for NativeError {
 
 /// Opaque BEAM resource holding a loaded whisper.cpp context.
 ///
-/// `WhisperContext` is `Send + Sync` per `whisper-rs`; we still wrap it in
-/// a [`parking_lot::Mutex`] to serialise our state-creation flow without
-/// risking poisoning if a panic occurs under the lock.
+/// `WhisperContext` is `Send + Sync` per `whisper-rs`. The
+/// [`parking_lot::Mutex`] only wraps the brief `create_state()` step;
+/// inference runs without it. See `transcribe::transcribe_one`.
 struct WhisperResource {
     ctx: Mutex<WhisperContext>,
     sampling_rate: usize,
@@ -89,6 +92,16 @@ struct WhisperResource {
 }
 
 impl rustler::Resource for WhisperResource {}
+
+/// Cooperative cancellation flag handed to `transcribe`. Elixir can call
+/// `nif_abort_handle_signal/1` from another process to ask the running
+/// inference to stop; whisper.cpp polls the abort callback between
+/// encoder/decoder steps and returns early.
+pub(crate) struct AbortHandle {
+    pub(crate) flag: Arc<AtomicBool>,
+}
+
+impl rustler::Resource for AbortHandle {}
 
 #[derive(NifMap)]
 struct LoadOpts {
@@ -345,6 +358,11 @@ fn build_request(opts: TranscribeOpts) -> TranscribeRequest {
 
 /// Transcribes a single PCM buffer. The buffer may be longer than the
 /// 30 s Whisper window; whisper.cpp chunks internally.
+///
+/// `abort` and `progress_pid` are optional cooperative hooks: if `abort`
+/// flips to `true` during inference, whisper.cpp returns early; if
+/// `progress_pid` is set, the inference sends
+/// `{:whisper_progress, percent}` messages to that pid as work advances.
 #[rustler::nif(schedule = "DirtyCpu")]
 #[allow(clippy::needless_pass_by_value)]
 fn nif_transcribe<'a>(
@@ -352,20 +370,68 @@ fn nif_transcribe<'a>(
     model: ResourceArc<WhisperResource>,
     samples_bin: Binary,
     opts: TranscribeOpts,
+    abort: Option<ResourceArc<AbortHandle>>,
+    progress_pid: Option<LocalPid>,
 ) -> Term<'a> {
     let bytes = samples_bin.as_slice();
+    let abort_flag = abort.map(|h| Arc::clone(&h.flag));
     let result = run_with_panic_protection(|| {
         let samples = decode_pcm_f32(bytes)?;
         let request = build_request(opts);
-        let transcription = transcribe::transcribe_one(&model.ctx, &samples, &request)?;
+        let transcription =
+            transcribe::transcribe_one(&model.ctx, &samples, &request, abort_flag, progress_pid)?;
         Ok(NifTranscription::from(transcription))
     });
 
     encode_result(env, result)
 }
 
+/// Allocates a fresh cooperative-cancellation flag.
+#[rustler::nif]
+fn nif_new_abort_handle() -> ResourceArc<AbortHandle> {
+    ResourceArc::new(AbortHandle {
+        flag: Arc::new(AtomicBool::new(false)),
+    })
+}
+
+/// Signals an `AbortHandle`; in-flight transcribe calls observing this
+/// flag will return early.
+#[rustler::nif]
+#[allow(clippy::needless_pass_by_value)]
+fn nif_abort_handle_signal(handle: ResourceArc<AbortHandle>) -> rustler::Atom {
+    handle.flag.store(true, Ordering::SeqCst);
+    ok()
+}
+
+/// Reads the current state of an `AbortHandle` (`true` once signalled).
+#[rustler::nif]
+#[allow(clippy::needless_pass_by_value)]
+fn nif_abort_handle_aborted(handle: ResourceArc<AbortHandle>) -> bool {
+    handle.flag.load(Ordering::SeqCst)
+}
+
+/// Decodes a `.wav` byte buffer into little-endian f32 mono PCM at
+/// 16 kHz. Returns the raw byte buffer; callers that want a Vec<f32>
+/// can reinterpret it on the Rust side.
+#[rustler::nif(schedule = "DirtyCpu")]
+#[allow(clippy::needless_pass_by_value)]
+fn nif_decode_wav<'a>(env: Env<'a>, bytes: Binary) -> Term<'a> {
+    let result = run_with_panic_protection(|| {
+        let pcm = wav::decode(bytes.as_slice())?;
+        let mut bin = OwnedBinary::new(pcm.len())
+            .ok_or_else(|| NativeError::new("runtime_error", "failed to allocate output binary"))?;
+        bin.as_mut_slice().copy_from_slice(&pcm);
+        Ok(bin)
+    });
+
+    match result {
+        Ok(bin) => (ok(), Binary::from_owned(bin, env)).encode(env),
+        Err(err) => (error(), err).encode(env),
+    }
+}
+
 fn on_load(env: Env<'_>, _info: Term<'_>) -> bool {
-    env.register::<WhisperResource>().is_ok()
+    env.register::<WhisperResource>().is_ok() && env.register::<AbortHandle>().is_ok()
 }
 
 rustler::init!("Elixir.WhisperCpp.Native", load = on_load);

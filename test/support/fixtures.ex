@@ -8,6 +8,8 @@ defmodule WhisperCpp.Test.Fixtures do
   `WHISPER_CPP_REFRESH=1` to force re-download.
   """
 
+  require Logger
+
   @model_url "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin"
   @audio_url "https://github.com/ggerganov/whisper.cpp/raw/master/samples/jfk.wav"
 
@@ -54,7 +56,7 @@ defmodule WhisperCpp.Test.Fixtures do
   end
 
   defp ensure_file!(path, url) do
-    File.mkdir_p!(Path.dirname(path))
+    path |> Path.dirname() |> File.mkdir_p!()
 
     if System.get_env("WHISPER_CPP_REFRESH") == "1" do
       _ = File.rm(path)
@@ -69,11 +71,17 @@ defmodule WhisperCpp.Test.Fixtures do
   end
 
   defp download!(url, dest) do
-    IO.puts(:stderr, "[fixtures] downloading #{url} -> #{dest}")
+    Logger.info("downloading fixture #{url} -> #{dest}")
     tmp = dest <> ".part"
 
+    # Test-only fetch from a hardcoded literal URL. The `env: []` clears
+    # the parent's environment so sensitive variables (auth tokens,
+    # creds) cannot leak into the curl subprocess.
     {_, 0} =
-      System.cmd("curl", ["-fLsS", "--retry", "3", "-o", tmp, url], stderr_to_stdout: true)
+      System.cmd("curl", ["-fLsS", "--retry", "3", "-o", tmp, url],
+        stderr_to_stdout: true,
+        env: []
+      )
 
     File.rename!(tmp, dest)
   end
