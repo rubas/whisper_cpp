@@ -58,6 +58,7 @@ defmodule WhisperCpp do
   math and timestamp shift for you.
   """
 
+  alias WhisperCpp.AbortHandle
   alias WhisperCpp.Error
   alias WhisperCpp.Model
   alias WhisperCpp.Native
@@ -89,6 +90,8 @@ defmodule WhisperCpp do
           | {:suppress_non_speech_tokens, boolean()}
           | {:single_segment, boolean()}
           | {:print_progress, boolean()}
+          | {:abort_handle, AbortHandle.t() | nil}
+          | {:progress_pid, pid() | nil}
 
   @typedoc "Options accepted by `load_model/2`."
   @type load_opt :: {:device, Model.device() | :auto} | {:use_gpu, boolean()}
@@ -205,6 +208,12 @@ defmodule WhisperCpp do
   - `:suppress_blank`, `:suppress_non_speech_tokens` - decoder suppressions.
   - `:single_segment` - force a single segment for the whole audio.
   - `:print_progress` - whisper.cpp progress to stderr.
+  - `:abort_handle` - `%WhisperCpp.AbortHandle{}` whose `abort/1` cancels
+    in-flight inference. The call returns `{:ok, partial_transcription}`
+    with whatever segments completed before the abort took effect.
+  - `:progress_pid` - pid that receives `{:whisper_progress, percent}`
+    messages (0..100) as work advances; duplicate percentages are
+    coalesced.
   """
   @spec transcribe(Model.t(), audio(), [transcribe_opt()]) ::
           {:ok, Transcription.t()} | {:error, Error.t()}
@@ -281,7 +290,15 @@ defmodule WhisperCpp do
   end
 
   defp do_transcribe(%Model{ref: ref}, samples, opts, offset_s) do
-    case Native.transcribe(ref, samples, build_transcribe_opts(opts)) do
+    abort_ref =
+      case Keyword.get(opts, :abort_handle) do
+        %AbortHandle{ref: ref} -> ref
+        nil -> nil
+      end
+
+    progress_pid = Keyword.get(opts, :progress_pid)
+
+    case Native.transcribe(ref, samples, build_transcribe_opts(opts), abort_ref, progress_pid) do
       {:ok, payload} -> {:ok, build_transcription(payload, offset_s)}
       {:error, payload} -> {:error, Error.from_native(payload)}
     end
@@ -457,9 +474,19 @@ defmodule WhisperCpp do
       suppress_blank: &is_boolean/1,
       suppress_non_speech_tokens: &is_boolean/1,
       single_segment: &is_boolean/1,
-      print_progress: &is_boolean/1
+      print_progress: &is_boolean/1,
+      abort_handle: &valid_abort_handle?/1,
+      progress_pid: &valid_optional_pid?/1
     }
   end
+
+  defp valid_abort_handle?(nil), do: true
+  defp valid_abort_handle?(%AbortHandle{}), do: true
+  defp valid_abort_handle?(_), do: false
+
+  defp valid_optional_pid?(nil), do: true
+  defp valid_optional_pid?(pid) when is_pid(pid), do: true
+  defp valid_optional_pid?(_), do: false
 
   @spec validate_options(keyword(), map()) :: :ok | {:error, Error.t()}
   defp validate_options(opts, validators) do
