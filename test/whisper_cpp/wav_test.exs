@@ -1,4 +1,10 @@
 defmodule WhisperCpp.WavTest do
+  @moduledoc """
+  Tests for `WhisperCpp.Wav` - RIFF/WAVE parsing, format rejection for
+  unsupported sample rates / channel counts / bit depths, and disk I/O
+  failure paths.
+  """
+
   use ExUnit.Case, async: true
 
   alias WhisperCpp.Error

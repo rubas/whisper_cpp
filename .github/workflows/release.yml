@@ -19,7 +19,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: "1.85.0"
+  RUST_TOOLCHAIN: "1.91.0"
 
 jobs:
   detect:

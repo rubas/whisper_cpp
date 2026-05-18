@@ -1,4 +1,12 @@
 defmodule WhisperCppTest do
+  @moduledoc """
+  Tests for the public `WhisperCpp` API: argument validation paths,
+  transcription / segment / word payload mapping, and the
+  `transcribe_slice/4` range-validation contract. Covers everything that
+  can be checked without a loaded NIF; end-to-end behaviour lives in
+  `test/integration_test.exs`.
+  """
+
   use ExUnit.Case, async: true
 
   alias WhisperCpp.Error
@@ -159,6 +167,23 @@ defmodule WhisperCppTest do
     test "rejects negative start", %{model: m, samples: s} do
       assert {:error, %Error{reason: :invalid_request}} =
                WhisperCpp.transcribe_slice(m, s, {-1.0, 2.0})
+    end
+
+    test "rejects inverted range (end before start)", %{model: m, samples: s} do
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.transcribe_slice(m, s, {0.5, 0.4})
+
+      assert msg =~ "greater than start"
+    end
+
+    test "rejects zero-length range", %{model: m, samples: s} do
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe_slice(m, s, {1.0, 1.0})
+    end
+
+    test "rejects fully-negative range", %{model: m, samples: s} do
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe_slice(m, s, {-1.0, -0.9})
     end
 
     test "propagates slice-bounds errors from Pcm.slice", %{model: m, samples: s} do

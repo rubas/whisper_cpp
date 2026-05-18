@@ -2,7 +2,7 @@
 //! `whisper-rs` 0.16. Owns the decoding strategy, parameter setting,
 //! and segment/word collection.
 
-use crate::errors::{inference_error, ErrorContext as _};
+use crate::errors::{ErrorContext as _, inference_error};
 use parking_lot::Mutex;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperState};
 
@@ -114,18 +114,22 @@ fn build_params<'a>(req: &'a TranscribeRequest) -> FullParams<'a, 'a> {
     params
 }
 
-/// Transcribe a single PCM buffer. The whisper.cpp engine is reentrant
-/// for inference; we still wrap the context in a [`parking_lot::Mutex`]
-/// to serialise state creation under a single resource handle.
+/// Transcribe a single PCM buffer. We hold the context mutex only long
+/// enough to call `create_state()` and then drop it; `WhisperState`
+/// carries its own `Arc<WhisperInnerContext>` so inference proceeds
+/// without serialising other in-flight transcribe calls against the
+/// same loaded model.
 pub fn transcribe_one(
     ctx: &Mutex<WhisperContext>,
     samples: &[f32],
     request: &TranscribeRequest,
 ) -> anyhow::Result<TranscriptionResult> {
-    let ctx_guard = ctx.lock();
-    let mut state: WhisperState = ctx_guard
-        .create_state()
-        .inference_error_ctx("failed to create whisper state")?;
+    let mut state: WhisperState = {
+        let ctx_guard = ctx.lock();
+        ctx_guard
+            .create_state()
+            .inference_error_ctx("failed to create whisper state")?
+    };
 
     let params = build_params(request);
 

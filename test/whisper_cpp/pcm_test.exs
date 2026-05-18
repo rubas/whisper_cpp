@@ -1,4 +1,9 @@
 defmodule WhisperCpp.PcmTest do
+  @moduledoc """
+  Tests for `WhisperCpp.Pcm` - byte-math, alignment guards, and bounds
+  rejection on f32 PCM slicing.
+  """
+
   use ExUnit.Case, async: true
 
   alias WhisperCpp.Error

@@ -21,7 +21,7 @@ env:
   MIX_ENV: test
   ELIXIR_VERSION: "1.18.4"
   OTP_VERSION: "27.3"
-  RUST_TOOLCHAIN: "1.85.0"
+  RUST_TOOLCHAIN: "1.91.0"
 
 jobs:
   integration:

@@ -1,4 +1,9 @@
 defmodule WhisperCpp.ErrorTest do
+  @moduledoc """
+  Tests for `WhisperCpp.Error` - reason-atom mapping from native payloads,
+  the Exception protocol implementation, and constructor defaults.
+  """
+
   use ExUnit.Case, async: true
 
   alias WhisperCpp.Error

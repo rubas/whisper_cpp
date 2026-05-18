@@ -258,10 +258,22 @@ defmodule WhisperCpp do
     {:error, Error.new(:invalid_request, "expected a %Model{}, an f32 PCM binary, and a {start_s, end_s} tuple")}
   end
 
-  defp validate_slice_range(start_s, end_s) when end_s - start_s < 0.3, do: {:short, end_s - start_s}
-
+  # Order matters: validate the range itself (non-negative start, end
+  # strictly greater than start) before the short-slice fast path so an
+  # inverted or negative-duration tuple does not silently return an empty
+  # transcription.
   defp validate_slice_range(start_s, _end_s) when start_s < 0,
-    do: {:error, Error.new(:invalid_request, "start_s must be >= 0")}
+    do: {:error, Error.new(:invalid_request, "start_s must be >= 0", %{start_s: start_s})}
+
+  defp validate_slice_range(start_s, end_s) when end_s <= start_s,
+    do:
+      {:error,
+       Error.new(:invalid_request, "end_s must be greater than start_s", %{
+         start_s: start_s,
+         end_s: end_s
+       })}
+
+  defp validate_slice_range(start_s, end_s) when end_s - start_s < 0.3, do: {:short, end_s - start_s}
 
   defp validate_slice_range(_start_s, _end_s), do: :ok
 

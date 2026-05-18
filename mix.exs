@@ -54,7 +54,6 @@ defmodule WhisperCpp.MixProject do
       },
       files: ~w(lib
            native/whisper_cpp_native/src
-           native/whisper_cpp_native/build.rs
            native/whisper_cpp_native/Cargo.toml
            native/whisper_cpp_native/Cargo.lock
            checksum-*.exs
