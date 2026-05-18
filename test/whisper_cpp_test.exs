@@ -103,10 +103,10 @@ defmodule WhisperCppTest do
       assert {:error, %Error{reason: :invalid_request, message: msg}} =
                WhisperCpp.transcribe(fake_model, <<1, 2, 3, 4>>)
 
-      assert msg =~ ".wav path or"
+      assert msg =~ "{:pcm_f32, binary}"
     end
 
-    test "rejects non-existent .wav path" do
+    test "rejects a string path (PCM-only contract)" do
       fake_model = %WhisperCpp.Model{
         ref: make_ref(),
         path: "fake",
@@ -117,29 +117,10 @@ defmodule WhisperCppTest do
       }
 
       assert {:error, %Error{reason: :invalid_request, message: msg}} =
-               WhisperCpp.transcribe(fake_model, "/nonexistent/audio.wav")
+               WhisperCpp.transcribe(fake_model, "/some/audio.mp3")
 
-      assert msg =~ "does not exist"
-    end
-
-    test "rejects non-wav file extension" do
-      fake_model = %WhisperCpp.Model{
-        ref: make_ref(),
-        path: "fake",
-        sampling_rate: 16_000,
-        multilingual: false,
-        n_vocab: 51_864,
-        device: :cpu
-      }
-
-      tmp = Path.join(System.tmp_dir!(), "whisper_cpp_test_#{:rand.uniform(1_000_000)}.mp3")
-      File.write!(tmp, "garbage")
-      on_exit(fn -> File.rm(tmp) end)
-
-      assert {:error, %Error{reason: :invalid_request, message: msg}} =
-               WhisperCpp.transcribe(fake_model, tmp)
-
-      assert msg =~ "only .wav"
+      assert msg =~ "{:pcm_f32, binary}"
+      assert msg =~ "decode files upstream"
     end
   end
 

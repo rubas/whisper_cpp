@@ -23,6 +23,12 @@ Installation downloads a precompiled NIF artefact matching your target triple
 from the project's GitHub releases. No Rust toolchain or CMake is needed on
 the consumer side.
 
+### Supported runtime
+
+Precompiled NIF artefacts target **Erlang NIF version 2.17** (OTP 26+,
+including OTP 29). Consumers running older OTP releases must build the NIF
+from source by setting `WHISPER_CPP_BUILD=1`.
+
 ### Source builds
 
 Set `WHISPER_CPP_BUILD=1` in your environment (or
@@ -128,8 +134,13 @@ Both legacy `.bin` (GGML) and `.gguf` files are supported.
 ```elixir
 {:ok, model} = WhisperCpp.load_model("models/ggml-large-v3.bin")
 
+# Decode upstream (ffmpeg, bumblebee, whatever) into 16 kHz mono f32 PCM.
+pcm =
+  File.read!("jfk.pcm")  # produced by:
+                         #   ffmpeg -i jfk.wav -f f32le -ac 1 -ar 16000 jfk.pcm
+
 {:ok, %WhisperCpp.Transcription{text: text, segments: segs}} =
-  WhisperCpp.transcribe(model, "jfk.wav", language: "en")
+  WhisperCpp.transcribe(model, {:pcm_f32, pcm}, language: "en")
 
 IO.puts(text)
 # => "And so, my fellow Americans, ask not what your country can do for you ..."
@@ -146,29 +157,35 @@ per-word timing.
 
 ### Audio contract
 
-whisper.cpp expects **mono `f32` PCM samples at 16 kHz**, normalised to
-the `-1.0..1.0` range. `transcribe/3` accepts:
+`transcribe/3` accepts exactly one input shape:
 
-- a `.wav` path (16 kHz mono or stereo, 16/32-bit PCM or 32-bit float),
-  decoded by the built-in `WhisperCpp.Wav` module;
-- `{:pcm_f32, binary}` containing little-endian f32 samples.
+    {:pcm_f32, binary()}
 
-Non-`.wav` paths and bare binaries are rejected up front - a typo'd path
-used to silently turn into garbage PCM; now it returns a clear
-`:invalid_request` error.
+where `binary` is little-endian IEEE-754 `f32` samples, mono, 16 kHz,
+normalised to `[-1.0, 1.0]`. This library does **not** decode audio
+file formats — decode WAV / MP3 / FLAC / M4A / Opus / etc. upstream and
+hand the PCM in. Standard recipes:
+
+```bash
+ffmpeg -i input.mp3  -f f32le -ac 1 -ar 16000 input.pcm
+ffmpeg -i input.m4a  -f f32le -ac 1 -ar 16000 input.pcm
+ffmpeg -i input.opus -f f32le -ac 1 -ar 16000 input.pcm
+```
+
+Keeping decoding out of `whisper_cpp` means a diarization → VAD →
+transcription pipeline decodes once and shares the PCM across stages,
+instead of every stage bundling its own (potentially divergent)
+decoder.
 
 ### Diarization-driven workflows
 
-Decode the master WAV once and transcribe each diarization turn without
-re-decoding or shelling out to a subprocess per turn:
-
 ```elixir
-{:ok, samples} = WhisperCpp.Wav.read_file("call.wav")
+pcm = File.read!("call.pcm")
 
 results =
   for {start_s, end_s, speaker} <- diar_turns do
     {:ok, t} =
-      WhisperCpp.transcribe_slice(model, samples, {start_s, end_s},
+      WhisperCpp.transcribe_slice(model, pcm, {start_s, end_s},
         language: "en",
         word_timestamps: true,
         n_threads: 4
@@ -186,7 +203,7 @@ original audio. Slices shorter than 0.3 s return an empty transcription
 ### Decoding biases
 
 ```elixir
-WhisperCpp.transcribe(model, "talk.wav",
+WhisperCpp.transcribe(model, {:pcm_f32, pcm},
   language: "en",
   initial_prompt: "Discussion of whisper.cpp, BEAM, and Whisper internals."
 )

@@ -12,7 +12,7 @@ defmodule WhisperCpp.AbortHandle do
 
       task =
         Task.async(fn ->
-          WhisperCpp.transcribe(model, "long.wav", abort_handle: handle)
+          WhisperCpp.transcribe(model, {:pcm_f32, pcm}, abort_handle: handle)
         end)
 
       Process.send_after(self(), :timeout, 30_000)

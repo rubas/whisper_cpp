@@ -15,15 +15,23 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   paths and `{:pcm_f32, binary}` buffers with segment + token output.
 - `WhisperCpp.transcribe_slice/4`: time-shifted per-slice transcription
   for diarization-driven workflows.
-- `WhisperCpp.Wav` / `WhisperCpp.Pcm`: WAV decoder and PCM slicing
-  helpers.
+- `WhisperCpp.AbortHandle`: cooperative cancellation. Pass an
+  `%AbortHandle{}` via `:abort_handle` and call `AbortHandle.abort/1`
+  from another process to stop in-flight inference.
+- `:progress_pid` transcribe option: receive `{:whisper_progress, pct}`
+  messages as work advances; duplicate percentages are coalesced.
+- `WhisperCpp.Pcm`: PCM slicing helpers for diarization-driven
+  workflows. `transcribe/3` accepts only `{:pcm_f32, binary}` (little-
+  endian f32 mono at 16 kHz); callers decode audio files upstream so
+  multi-stage pipelines share one decoded buffer.
 - `WhisperCpp.available_devices/0`: backend introspection for the
   loaded NIF artefact.
 - `:word_timestamps` option for per-word timing.
 - Rustler NIF using `whisper-rs` 0.16 with cargo features for `cuda`,
   `hipblas`, `vulkan`, `metal`, `coreml`, `intel-sycl`, `openblas`,
-  `openmp`.
+  `openmp`. Inference no longer serialises across processes sharing one
+  loaded model.
 - Precompiled NIF artefacts via `rustler_precompiled` for x86_64 / aarch64
   Linux (CPU, CUDA, hipBLAS variants) and aarch64 macOS (Metal).
 - `Taskfile.yml`, strict Credo configuration, CI / integration / release
-  GitHub workflows.
+  GitHub workflows on Elixir 1.20-rc / OTP 29.

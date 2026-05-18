@@ -13,13 +13,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use parking_lot::Mutex;
-use rustler::types::binary::{Binary, OwnedBinary};
-use rustler::{Encoder, Env, LocalPid, NifMap, OwnedEnv, ResourceArc, Term};
+use rustler::types::binary::Binary;
+use rustler::{Encoder, Env, LocalPid, NifMap, ResourceArc, Term};
 use whisper_rs::{WhisperContext, WhisperContextParameters};
 
 mod errors;
 mod transcribe;
-mod wav;
 
 use errors::kind_from_chain;
 use transcribe::{SegmentResult, TranscribeRequest, TranscriptionResult, WordResult};
@@ -290,7 +289,7 @@ fn nif_load_model(env: Env<'_>, path: String, opts: LoadOpts) -> Term<'_> {
         // API does not expose the rate so we hardcode it.
         let sampling_rate = 16_000_usize;
         let multilingual = ctx.is_multilingual();
-        let n_vocab = ctx.n_vocab() as usize;
+        let n_vocab = usize::try_from(ctx.n_vocab()).unwrap_or(0);
 
         Ok(ResourceArc::new(WhisperResource {
             ctx: Mutex::new(ctx),
@@ -320,7 +319,7 @@ fn nif_model_info(env: Env<'_>, model: ResourceArc<WhisperResource>) -> Term<'_>
 }
 
 fn decode_pcm_f32(bytes: &[u8]) -> Result<Vec<f32>, NativeError> {
-    if bytes.len() % 4 != 0 {
+    if !bytes.len().is_multiple_of(4) {
         return Err(NativeError::new(
             "invalid_request",
             "samples binary length must be a multiple of 4 (f32)",
@@ -408,26 +407,6 @@ fn nif_abort_handle_signal(handle: ResourceArc<AbortHandle>) -> rustler::Atom {
 #[allow(clippy::needless_pass_by_value)]
 fn nif_abort_handle_aborted(handle: ResourceArc<AbortHandle>) -> bool {
     handle.flag.load(Ordering::SeqCst)
-}
-
-/// Decodes a `.wav` byte buffer into little-endian f32 mono PCM at
-/// 16 kHz. Returns the raw byte buffer; callers that want a Vec<f32>
-/// can reinterpret it on the Rust side.
-#[rustler::nif(schedule = "DirtyCpu")]
-#[allow(clippy::needless_pass_by_value)]
-fn nif_decode_wav<'a>(env: Env<'a>, bytes: Binary) -> Term<'a> {
-    let result = run_with_panic_protection(|| {
-        let pcm = wav::decode(bytes.as_slice())?;
-        let mut bin = OwnedBinary::new(pcm.len())
-            .ok_or_else(|| NativeError::new("runtime_error", "failed to allocate output binary"))?;
-        bin.as_mut_slice().copy_from_slice(&pcm);
-        Ok(bin)
-    });
-
-    match result {
-        Ok(bin) => (ok(), Binary::from_owned(bin, env)).encode(env),
-        Err(err) => (error(), err).encode(env),
-    }
 }
 
 fn on_load(env: Env<'_>, _info: Term<'_>) -> bool {
