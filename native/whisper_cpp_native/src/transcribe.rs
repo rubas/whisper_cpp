@@ -2,7 +2,7 @@
 //! `whisper-rs` 0.16. Owns the decoding strategy, parameter setting,
 //! and segment/word collection.
 
-use crate::errors::{inference_error, ErrorContext as _};
+use crate::errors::{ErrorContext as _, inference_error};
 use parking_lot::Mutex;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperState};
 
