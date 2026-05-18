@@ -4,11 +4,13 @@ Guidance for AI agents working on `whisper_cpp`.
 
 ## What this library is
 
-Elixir bindings for whisper.cpp over a Rustler NIF. The Rust side links
-whisper.cpp through the `whisper-rs` crate; the Elixir side wraps it
-with a typed, validated API plus a WAV decoder and PCM slicing helpers.
-There is no `whisper-cli` subprocess, no Python interop, no temporary
-WAV files.
+Elixir bindings for whisper.cpp over a Rustler NIF. The Rust side
+links whisper.cpp through the `whisper-rs` crate; the Elixir side
+wraps it with a typed, validated API plus PCM slicing helpers. Audio
+file decoding is intentionally **out of scope** — the library accepts
+only `{:pcm_f32, binary}` (little-endian f32 mono at 16 kHz). Callers
+decode upstream (ffmpeg, bumblebee, …) so multi-stage pipelines share
+one decoded PCM buffer.
 
 ## Source-of-truth files
 
@@ -29,12 +31,12 @@ WAV files.
 WhisperCpp.load_model(path, opts) -> {:ok, Model.t()} | {:error, Error.t()}
 WhisperCpp.transcribe(Model.t(), audio, opts) -> {:ok, Transcription.t()} | {:error, _}
 WhisperCpp.transcribe_slice(Model.t(), pcm_binary, {start_s, end_s}, opts) -> {:ok, Transcription.t()} | {:error, _}
-WhisperCpp.available_devices() -> {:ok, %{backends, gpu_supported, gpu_devices}} | {:error, _}
+WhisperCpp.available_devices() -> {:ok, %{backends, gpu_supported}} | {:error, _}
 ```
 
-Audio is either a `.wav` path (decoded by `WhisperCpp.Wav`) or
-`{:pcm_f32, binary}` (little-endian f32 mono at 16 kHz). Bare binaries
-are rejected.
+Audio is `{:pcm_f32, binary}` — little-endian f32 mono at 16 kHz.
+Anything else (file paths, bare binaries) is rejected with
+`:invalid_request`. Callers decode upstream.
 
 ## Backends
 
@@ -85,5 +87,14 @@ task check           # full local gate
 2. Push to `main`. The `release.yml` workflow detects the version bump,
    builds NIF tarballs for every target/variant, creates the tag and
    GitHub release, and commits an updated
-   `checksum-Elixir.WhisperCpp.Native.exs`.
-3. Pull `main` locally and run `mix hex.publish` from a clean tree.
+   `checksum-Elixir.WhisperCpp.Native.exs` back to `main`.
+3. `git pull` (or `jj git fetch`) to get that checksum commit locally.
+   Verify `checksum-Elixir.WhisperCpp.Native.exs` exists and matches the
+   tag's release assets - `mix hex.publish` will fail without it.
+4. Run `mix hex.publish` from a clean tree.
+
+The checksum file is intentionally not tracked between releases: the
+release workflow regenerates and commits it after each tagged build, so
+the file in `main` always corresponds to the most recent published
+artefacts. Never publish locally without first pulling the workflow's
+checksum commit.

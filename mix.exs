@@ -40,7 +40,8 @@ defmodule WhisperCpp.MixProject do
 
   @spec description() :: String.t()
   defp description do
-    "Native Elixir bindings for whisper.cpp with CPU, CUDA, and ROCm (hipBLAS) backends."
+    "Native Elixir bindings for whisper.cpp. Accepts 16 kHz mono f32 PCM " <>
+      "and runs on CPU, CUDA, ROCm (hipBLAS), Metal, Vulkan, or CoreML."
   end
 
   @spec package() :: keyword()

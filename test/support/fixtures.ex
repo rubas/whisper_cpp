@@ -2,16 +2,19 @@ defmodule WhisperCpp.Test.Fixtures do
   @moduledoc """
   Test fixture helpers.
 
-  The integration suite downloads the `ggml-tiny.en` model (~75 MB) and
-  the `jfk.wav` sample from the whisper.cpp release server, caches them
-  under `test/fixtures/`, and reuses them across runs. Set
-  `WHISPER_CPP_REFRESH=1` to force re-download.
+  The integration suite downloads the `ggml-tiny.en` model (~75 MB) on
+  first run and caches it under `test/fixtures/`. Set
+  `WHISPER_CPP_REFRESH=1` to force a re-download.
+
+  Audio is shipped as a pre-converted PCM fixture (`jfk.f32le.16k.pcm`
+  alongside this file) so tests need neither ffmpeg nor the JFK WAV
+  download. The PCM is little-endian f32 mono at 16 kHz, matching the
+  contract `WhisperCpp.transcribe/3` expects.
   """
 
   require Logger
 
   @model_url "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin"
-  @audio_url "https://github.com/ggerganov/whisper.cpp/raw/master/samples/jfk.wav"
 
   @spec fixtures_dir() :: Path.t()
   def fixtures_dir do
@@ -21,39 +24,21 @@ defmodule WhisperCpp.Test.Fixtures do
   @spec model_path() :: Path.t()
   def model_path, do: Path.join(fixtures_dir(), "ggml-tiny.en.bin")
 
-  @spec audio_path() :: Path.t()
-  def audio_path, do: Path.join(fixtures_dir(), "jfk.wav")
+  @spec pcm_path() :: Path.t()
+  def pcm_path do
+    Path.join([File.cwd!(), "test", "support", "jfk.f32le.16k.pcm"])
+  end
 
   @spec ensure_model!() :: Path.t()
   def ensure_model!, do: ensure_file!(model_path(), @model_url)
 
-  @spec ensure_audio!() :: Path.t()
-  def ensure_audio!, do: ensure_file!(audio_path(), @audio_url)
-
-  @spec wav_fixture_bytes() :: binary()
-  def wav_fixture_bytes do
-    # 16 kHz mono 16-bit PCM, 0.5 s of silence; small enough to embed in
-    # tests without slowing them down.
-    n_samples = 8_000
-    data = <<0::size(n_samples * 16)>>
-
-    fmt_chunk = <<
-      0x10::little-32,
-      1::little-16,
-      1::little-16,
-      16_000::little-32,
-      32_000::little-32,
-      2::little-16,
-      16::little-16
-    >>
-
-    data_chunk = <<byte_size(data)::little-32, data::binary>>
-    fmt = <<"fmt ", fmt_chunk::binary>>
-    data_chunk_with_tag = <<"data", data_chunk::binary>>
-
-    body = <<"WAVE", fmt::binary, data_chunk_with_tag::binary>>
-    <<"RIFF", byte_size(body)::little-32, body::binary>>
-  end
+  @doc """
+  Returns the JFK sample as a binary of little-endian f32 mono samples
+  at 16 kHz. The file is committed at `test/support/jfk.f32le.16k.pcm`,
+  so this is a plain `File.read!` — no network, no ffmpeg.
+  """
+  @spec pcm!() :: binary()
+  def pcm!, do: File.read!(pcm_path())
 
   defp ensure_file!(path, url) do
     path |> Path.dirname() |> File.mkdir_p!()

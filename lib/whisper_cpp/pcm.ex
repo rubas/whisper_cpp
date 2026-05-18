@@ -3,10 +3,11 @@ defmodule WhisperCpp.Pcm do
   Helpers for slicing little-endian f32 PCM buffers without re-decoding the
   source audio.
 
-  A diarization-driven workflow typically decodes the master WAV once via
-  `WhisperCpp.Wav.read_file/1` and then runs many short transcribe calls
-  over per-turn slices. `slice/4` does the byte math (4 bytes per sample
-  at `sample_rate` samples/second) and bounds-checks against the buffer
+  A diarization-driven workflow typically decodes the master file
+  upstream (e.g. `ffmpeg -f f32le -ac 1 -ar 16000`) once into a master
+  PCM buffer, then runs many short transcribe calls over per-turn
+  slices. `slice/4` does the byte math (4 bytes per sample at
+  `sample_rate` samples/second) and bounds-checks against the buffer
   size.
   """
 

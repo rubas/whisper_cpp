@@ -2,45 +2,46 @@ defmodule WhisperCpp do
   @moduledoc """
   Native Elixir bindings for [whisper.cpp](https://github.com/ggerganov/whisper.cpp).
 
-  Calls into whisper.cpp's C API through the `whisper-rs` Rust crate via a
-  Rustler NIF. No `whisper-cli` subprocess, no Python, no temporary WAV
+  Calls into whisper.cpp's C API through the `whisper-rs` Rust crate via
+  a Rustler NIF. No `whisper-cli` subprocess, no Python, no temporary
   files. Structured per-segment results, `:initial_prompt` biasing,
   word-level timestamps, and CUDA / ROCm (hipBLAS) / CPU backends are all
   first-class.
 
   Diarization-driven workflows are first-class via `transcribe_slice/4`:
-  decode WAV once, then run many short transcribe calls over per-turn
-  slices with absolute timestamps preserved across the original audio
-  timeline.
+  hand in the master PCM buffer once, then run many short transcribe
+  calls over per-turn slices with absolute timestamps preserved across
+  the original audio timeline.
 
   ## Quickstart
 
       {:ok, model} = WhisperCpp.load_model("models/ggml-large-v3.bin")
 
       {:ok, %WhisperCpp.Transcription{text: text, segments: segs}} =
-        WhisperCpp.transcribe(model, "jfk.wav", language: "en")
+        WhisperCpp.transcribe(model, {:pcm_f32, samples}, language: "en")
 
       IO.puts(text)
       for s <- segs, do: IO.puts("[\#{s.start}-\#{s.end}] \#{s.text}")
 
   ## Audio contract
 
-  whisper.cpp expects **mono `f32` PCM samples at 16 kHz**, normalised to
-  the `-1.0..1.0` range. `transcribe/3` accepts:
+  `transcribe/3` accepts exactly one input shape:
 
-  - a `.wav` path (16 kHz mono or stereo, 16/32-bit PCM or 32-bit float),
-    decoded by the built-in `WhisperCpp.Wav` module;
-  - a `{:pcm_f32, binary}` tuple containing little-endian f32 samples.
+      {:pcm_f32, binary()}
 
-  Raw bare-binary input is rejected on purpose: a typo'd path used to
-  silently turn into garbage PCM. Use `{:pcm_f32, binary}` for in-memory
-  buffers.
+  where `binary` is little-endian IEEE-754 `f32` samples, mono, 16 kHz,
+  normalised to `[-1.0, 1.0]`.
+
+  This library does **not** decode audio file formats. Decode WAV / MP3 /
+  FLAC / M4A / Opus / etc. upstream and hand the resulting PCM to
+  `transcribe/3`. ffmpeg is the standard tool:
+
+      ffmpeg -i input.mp3 -f f32le -ac 1 -ar 16000 - | …
 
   ## Diarization-driven workflows
 
-  Decode the master WAV once, then transcribe each diarization turn:
-
-      {:ok, samples} = WhisperCpp.Wav.read_file("call.wav")
+  Decode upstream once into a master PCM buffer, then transcribe each
+  diarization turn:
 
       for {start_s, end_s, _spk} <- turns do
         {:ok, slice} =
@@ -65,11 +66,12 @@ defmodule WhisperCpp do
   alias WhisperCpp.Pcm
   alias WhisperCpp.Segment
   alias WhisperCpp.Transcription
-  alias WhisperCpp.Wav
   alias WhisperCpp.Word
 
-  @typedoc "Audio sources accepted by `transcribe/3` and `transcribe_slice/4`."
-  @type audio :: Path.t() | {:pcm_f32, binary()}
+  @typedoc "Audio input accepted by `transcribe/3`."
+  @type audio :: {:pcm_f32, binary()}
+
+  @target_sample_rate 16_000
 
   @typedoc "Options accepted by `transcribe/3` / `transcribe_slice/4`."
   @type transcribe_opt ::
@@ -320,32 +322,16 @@ defmodule WhisperCpp do
     end
   end
 
-  defp resolve_audio(path) when is_binary(path) do
-    cond do
-      not File.regular?(path) ->
-        {:error, Error.new(:invalid_request, "audio path does not exist or is not a regular file", %{path: path})}
-
-      String.ends_with?(path, ".wav") ->
-        case Wav.read_file(path) do
-          {:ok, <<>>} -> {:error, Error.new(:invalid_request, "WAV decoded to zero samples", %{path: path})}
-          other -> other
-        end
-
-      true ->
-        {:error,
-         Error.new(
-           :invalid_request,
-           "only .wav paths are accepted; resample/decode upstream or pass {:pcm_f32, binary}",
-           %{path: path}
-         )}
-    end
-  end
-
   defp resolve_audio(_) do
-    {:error, Error.new(:invalid_request, "audio must be a .wav path or {:pcm_f32, binary}")}
+    {:error,
+     Error.new(
+       :invalid_request,
+       "audio must be {:pcm_f32, binary} (little-endian f32 mono at 16 kHz); " <>
+         "decode files upstream"
+     )}
   end
 
-  defp sample_rate, do: Wav.target_rate()
+  defp sample_rate, do: @target_sample_rate
 
   defp native_call({:ok, _} = ok), do: ok
   defp native_call({:error, payload}), do: {:error, Error.from_native(payload)}

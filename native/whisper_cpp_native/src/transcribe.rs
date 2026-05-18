@@ -12,75 +12,84 @@ use rustler::{Encoder, LocalPid, OwnedEnv};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperState};
 
 /// Per-call decoding request decoded from the Elixir-side `TranscribeOpts`.
-pub struct TranscribeRequest {
-    pub language: Option<String>,
-    pub translate: bool,
-    pub initial_prompt: Option<String>,
-    pub word_timestamps: bool,
-    pub beam_size: Option<u32>,
-    pub best_of: Option<u32>,
-    pub temperature: Option<f32>,
-    pub n_threads: Option<u32>,
-    pub n_max_text_ctx: Option<u32>,
-    pub offset_ms: Option<u32>,
-    pub duration_ms: Option<u32>,
-    pub no_speech_thold: Option<f32>,
-    pub logprob_thold: Option<f32>,
-    pub suppress_blank: Option<bool>,
-    pub suppress_non_speech_tokens: Option<bool>,
-    pub single_segment: Option<bool>,
-    pub print_progress: bool,
+pub(crate) struct TranscribeRequest {
+    pub(crate) language: Option<String>,
+    pub(crate) translate: bool,
+    pub(crate) initial_prompt: Option<String>,
+    pub(crate) word_timestamps: bool,
+    pub(crate) beam_size: Option<u32>,
+    pub(crate) best_of: Option<u32>,
+    pub(crate) temperature: Option<f32>,
+    pub(crate) n_threads: Option<u32>,
+    pub(crate) n_max_text_ctx: Option<u32>,
+    pub(crate) offset_ms: Option<u32>,
+    pub(crate) duration_ms: Option<u32>,
+    pub(crate) no_speech_thold: Option<f32>,
+    pub(crate) logprob_thold: Option<f32>,
+    pub(crate) suppress_blank: Option<bool>,
+    pub(crate) suppress_non_speech_tokens: Option<bool>,
+    pub(crate) single_segment: Option<bool>,
+    pub(crate) print_progress: bool,
 }
 
-pub struct WordResult {
-    pub text: String,
-    pub start: f32,
-    pub end: f32,
-    pub probability: f32,
+pub(crate) struct WordResult {
+    pub(crate) text: String,
+    pub(crate) start: f32,
+    pub(crate) end: f32,
+    pub(crate) probability: f32,
 }
 
-pub struct SegmentResult {
-    pub text: String,
-    pub start: f32,
-    pub end: f32,
-    pub no_speech_prob: f32,
-    pub avg_logprob: f32,
-    pub tokens: Vec<u32>,
-    pub words: Option<Vec<WordResult>>,
+pub(crate) struct SegmentResult {
+    pub(crate) text: String,
+    pub(crate) start: f32,
+    pub(crate) end: f32,
+    pub(crate) no_speech_prob: f32,
+    pub(crate) avg_logprob: f32,
+    pub(crate) tokens: Vec<u32>,
+    pub(crate) words: Option<Vec<WordResult>>,
 }
 
-pub struct TranscriptionResult {
-    pub language: String,
-    pub duration_s: f32,
-    pub segments: Vec<SegmentResult>,
+pub(crate) struct TranscriptionResult {
+    pub(crate) language: String,
+    pub(crate) duration_s: f32,
+    pub(crate) segments: Vec<SegmentResult>,
+}
+
+/// Saturating, sign-preserving cast for `u32` count-like values handed
+/// to whisper-rs APIs that use `i32`. Realistic values (thread counts,
+/// beam sizes, millisecond offsets) never overflow; the saturation
+/// keeps the cast intent explicit instead of silently wrapping.
+#[inline]
+fn u32_to_i32(n: u32) -> i32 {
+    i32::try_from(n).unwrap_or(i32::MAX)
 }
 
 /// Build a `FullParams` from the request. Sampling strategy is beam-search
 /// when `beam_size > 1`, otherwise greedy.
-fn build_params<'a>(req: &'a TranscribeRequest) -> FullParams<'a, 'a> {
+fn build_params(req: &TranscribeRequest) -> FullParams<'_, '_> {
     let strategy = match req.beam_size {
         Some(n) if n > 1 => SamplingStrategy::BeamSearch {
-            beam_size: n as i32,
+            beam_size: u32_to_i32(n),
             patience: -1.0,
         },
         _ => SamplingStrategy::Greedy {
-            best_of: req.best_of.unwrap_or(1) as i32,
+            best_of: u32_to_i32(req.best_of.unwrap_or(1)),
         },
     };
 
     let mut params = FullParams::new(strategy);
 
     if let Some(t) = req.n_threads {
-        params.set_n_threads(t as i32);
+        params.set_n_threads(u32_to_i32(t));
     }
     if let Some(c) = req.n_max_text_ctx {
-        params.set_n_max_text_ctx(c as i32);
+        params.set_n_max_text_ctx(u32_to_i32(c));
     }
     if let Some(o) = req.offset_ms {
-        params.set_offset_ms(o as i32);
+        params.set_offset_ms(u32_to_i32(o));
     }
     if let Some(d) = req.duration_ms {
-        params.set_duration_ms(d as i32);
+        params.set_duration_ms(u32_to_i32(d));
     }
     if let Some(t) = req.temperature {
         params.set_temperature(t);
@@ -169,7 +178,7 @@ fn install_callbacks(
 /// carries its own `Arc<WhisperInnerContext>` so inference proceeds
 /// without serialising other in-flight transcribe calls against the
 /// same loaded model.
-pub fn transcribe_one(
+pub(crate) fn transcribe_one(
     ctx: &Mutex<WhisperContext>,
     samples: &[f32],
     request: &TranscribeRequest,
@@ -190,8 +199,8 @@ pub fn transcribe_one(
         .full(params, samples)
         .map_err(|e| inference_error(format!("whisper.cpp full() failed: {e}")))?;
 
-    let n_segments = state.full_n_segments();
-    let mut segments = Vec::with_capacity(n_segments as usize);
+    let n_segments = usize::try_from(state.full_n_segments()).unwrap_or(0);
+    let mut segments = Vec::with_capacity(n_segments);
 
     for seg in state.as_iter() {
         segments.push(extract_segment(&seg, request.word_timestamps)?);
@@ -205,6 +214,9 @@ pub fn transcribe_one(
             .unwrap_or_else(|| "en".to_owned())
     };
 
+    // 16 kHz mono f32 PCM: samples.len() / 16_000 with f32 precision.
+    // A 23-bit mantissa covers ~14 days of 16 kHz audio without loss.
+    #[allow(clippy::cast_precision_loss)]
     let duration_s = samples.len() as f32 / 16_000.0_f32;
 
     Ok(TranscriptionResult {
@@ -220,7 +232,7 @@ fn extract_segment(
 ) -> anyhow::Result<SegmentResult> {
     let text = seg
         .to_str_lossy()
-        .map(|cow| cow.into_owned())
+        .map(std::borrow::Cow::into_owned)
         .inference_error_ctx("failed to read segment text")?;
 
     // whisper.cpp reports times in 10-ms units (`t0`, `t1`).
@@ -228,10 +240,11 @@ fn extract_segment(
     let end = cs_to_s(seg.end_timestamp());
     let no_speech_prob = seg.no_speech_probability();
     let n_tokens = seg.n_tokens();
+    let token_cap = usize::try_from(n_tokens).unwrap_or(0);
 
-    let mut tokens = Vec::with_capacity(n_tokens as usize);
+    let mut tokens = Vec::with_capacity(token_cap);
     let mut total_logprob = 0.0_f32;
-    let mut counted = 0_i32;
+    let mut counted: u32 = 0;
     let mut words_acc: Option<Vec<WordResult>> = if word_timestamps {
         Some(Vec::new())
     } else {
@@ -251,8 +264,11 @@ fn extract_segment(
         // 50_257; everything above that is reserved (timestamps, lang
         // tokens, control). The monolingual `*.en` checkpoints share
         // the same range for normal text.
-        if id >= 0 && id < 50_257 {
-            tokens.push(id as u32);
+        if (0..50_257).contains(&id) {
+            // id is in [0, 50_257); u32::try_from never fails here.
+            if let Ok(u) = u32::try_from(id) {
+                tokens.push(u);
+            }
         }
 
         total_logprob += data.plog;
@@ -261,7 +277,7 @@ fn extract_segment(
         if let Some(ref mut buf) = words_acc {
             let tok_text = tok
                 .to_str_lossy()
-                .map(|cow| cow.into_owned())
+                .map(std::borrow::Cow::into_owned)
                 .unwrap_or_default();
 
             // Skip whisper.cpp special tokens for the word stream - they
@@ -293,12 +309,15 @@ fn extract_segment(
         }
     }
 
-    if let Some(ref mut buf) = words_acc {
-        if let Some(word) = current_word.take() {
-            buf.push(word);
-        }
+    if let Some(ref mut buf) = words_acc
+        && let Some(word) = current_word.take()
+    {
+        buf.push(word);
     }
 
+    // `counted` is a per-segment token count and never approaches f32's
+    // 2^24 precision boundary; the cast is exact for realistic inputs.
+    #[allow(clippy::cast_precision_loss)]
     let avg_logprob = if counted > 0 {
         total_logprob / counted as f32
     } else {
@@ -316,7 +335,12 @@ fn extract_segment(
     })
 }
 
+/// whisper.cpp reports timestamps in centiseconds (10 ms units). Audio
+/// realistically tops out at hours, so i64 -> f32 of these small
+/// integers is exact within precision; flag the lint at the cast.
 #[inline]
 fn cs_to_s(cs: i64) -> f32 {
-    cs as f32 / 100.0
+    #[allow(clippy::cast_precision_loss)]
+    let cs_f = cs as f32;
+    cs_f / 100.0
 }

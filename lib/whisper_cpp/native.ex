@@ -81,10 +81,6 @@ defmodule WhisperCpp.Native do
   @spec abort_handle_aborted?(reference()) :: boolean()
   def abort_handle_aborted?(handle), do: nif_abort_handle_aborted(handle)
 
-  @doc "Decodes WAV bytes into little-endian f32 mono PCM at 16 kHz."
-  @spec decode_wav(binary()) :: {:ok, binary()} | {:error, map()}
-  def decode_wav(bytes), do: nif_decode_wav(bytes)
-
   defp nif_available_devices, do: :erlang.nif_error(:nif_not_loaded)
   defp nif_load_model(_path, _opts), do: :erlang.nif_error(:nif_not_loaded)
   defp nif_model_info(_model), do: :erlang.nif_error(:nif_not_loaded)
@@ -95,5 +91,4 @@ defmodule WhisperCpp.Native do
   defp nif_new_abort_handle, do: :erlang.nif_error(:nif_not_loaded)
   defp nif_abort_handle_signal(_handle), do: :erlang.nif_error(:nif_not_loaded)
   defp nif_abort_handle_aborted(_handle), do: :erlang.nif_error(:nif_not_loaded)
-  defp nif_decode_wav(_bytes), do: :erlang.nif_error(:nif_not_loaded)
 end
