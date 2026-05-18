@@ -29,7 +29,7 @@ Set `WHISPER_CPP_BUILD=1` in your environment (or
 `config :rustler_precompiled, :force_build, whisper_cpp: true`) to compile
 from source. Base requirements:
 
-- Rust toolchain (`rustup`, stable >= 1.85)
+- Rust toolchain (`rustup`, stable >= 1.91)
 - `cmake`, a C++17 compiler, `make`
 - `pkg-config`, `libclang` (for `bindgen`)
 
@@ -98,7 +98,7 @@ and `task build:hipblas` shortcuts.
 
 ```elixir
 WhisperCpp.available_devices()
-#=> {:ok, %{backends: [:cpu, :cuda], gpu_supported: true, gpu_devices: 1}}
+#=> {:ok, %{backends: [:cpu, :cuda], gpu_supported: true}}
 
 {:ok, model} =
   WhisperCpp.load_model("models/ggml-large-v3.bin",

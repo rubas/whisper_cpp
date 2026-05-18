@@ -98,8 +98,8 @@ defmodule WhisperCpp do
   @doc """
   Reports the runtime backends compiled into this NIF artefact.
 
-  Returns `{:ok, %{backends: [...], gpu_supported: bool, gpu_devices: n}}`.
-  The `backends` list reflects compile-time cargo features (e.g.
+  Returns `{:ok, %{backends: [...], gpu_supported: bool}}`. The
+  `backends` list reflects compile-time cargo features (e.g.
   `[:cpu, :cuda]` on a `WHISPER_CPP_VARIANT=cuda` build).
 
   Build a source artefact with GPU support via:
@@ -116,7 +116,7 @@ defmodule WhisperCpp do
   Pick one accelerator per build; the backend is baked into the artefact.
   """
   @spec available_devices() ::
-          {:ok, %{backends: [atom()], gpu_supported: boolean(), gpu_devices: non_neg_integer()}}
+          {:ok, %{backends: [atom()], gpu_supported: boolean()}}
           | {:error, Error.t()}
   def available_devices do
     case Native.available_devices() do
@@ -124,8 +124,7 @@ defmodule WhisperCpp do
         {:ok,
          %{
            backends: Enum.map(info.backends, &String.to_existing_atom/1),
-           gpu_supported: info.gpu_supported,
-           gpu_devices: info.gpu_devices
+           gpu_supported: info.gpu_supported
          }}
 
       {:error, payload} ->
@@ -310,7 +309,10 @@ defmodule WhisperCpp do
         {:error, Error.new(:invalid_request, "audio path does not exist or is not a regular file", %{path: path})}
 
       String.ends_with?(path, ".wav") ->
-        Wav.read_file(path)
+        case Wav.read_file(path) do
+          {:ok, <<>>} -> {:error, Error.new(:invalid_request, "WAV decoded to zero samples", %{path: path})}
+          other -> other
+        end
 
       true ->
         {:error,

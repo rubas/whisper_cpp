@@ -3,8 +3,9 @@ defmodule WhisperCpp.Word do
   One word produced by `:word_timestamps`.
 
   Times are absolute seconds within the input audio. `probability` is the
-  per-token acoustic probability reported by whisper.cpp for the most
-  likely token in this word.
+  minimum per-token acoustic probability across the tokens that make up
+  this word (matching faster-whisper's per-word confidence reduction);
+  filter at e.g. `probability < 0.3` to flag low-confidence words.
   """
 
   @type t :: %__MODULE__{

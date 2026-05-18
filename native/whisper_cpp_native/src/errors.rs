@@ -18,6 +18,10 @@ impl std::fmt::Display for Kind {
     }
 }
 
+// Required so `anyhow::Error::chain().downcast_ref::<Kind>()` can match
+// this context tag - `downcast_ref` is bounded by `std::error::Error`.
+impl std::error::Error for Kind {}
+
 pub fn invalid_request<E>(err: E) -> anyhow::Error
 where
     E: std::fmt::Display + Send + Sync + 'static,

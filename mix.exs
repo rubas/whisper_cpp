@@ -9,7 +9,7 @@ defmodule WhisperCpp.MixProject do
     [
       app: :whisper_cpp,
       version: @version,
-      elixir: "~> 1.17",
+      elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       description: description(),

@@ -7,7 +7,7 @@
 #![deny(unsafe_code)]
 
 use std::collections::HashMap;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 
 use parking_lot::Mutex;
@@ -128,7 +128,6 @@ struct ModelInfo {
 struct AvailableDevices {
     backends: Vec<String>,
     gpu_supported: bool,
-    gpu_devices: u32,
 }
 
 #[derive(NifMap)]
@@ -244,9 +243,6 @@ fn nif_available_devices(env: Env<'_>) -> Term<'_> {
         Ok(AvailableDevices {
             backends,
             gpu_supported: GPU_BACKEND.is_some(),
-            // whisper.cpp does not expose a device-count probe through
-            // its C API; report 1 when a GPU backend is built in.
-            gpu_devices: u32::from(GPU_BACKEND.is_some()),
         })
     });
     encode_result(env, result)
