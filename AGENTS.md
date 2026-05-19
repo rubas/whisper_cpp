@@ -83,18 +83,18 @@ task check           # full local gate
 
 ## Hex publish flow
 
-1. Bump `@version` in `mix.exs` and add a `CHANGELOG.md` entry.
-2. Push to `main`. The `release.yml` workflow detects the version bump,
-   builds NIF tarballs for every target/variant, creates the tag and
-   GitHub release, and commits an updated
-   `checksum-Elixir.WhisperCpp.Native.exs` back to `main`.
-3. `git pull` (or `jj git fetch`) to get that checksum commit locally.
-   Verify `checksum-Elixir.WhisperCpp.Native.exs` exists and matches the
-   tag's release assets - `mix hex.publish` will fail without it.
-4. Run `mix hex.publish` from a clean tree.
+1. Bump `@version` in `mix.exs` and add a `CHANGELOG.md` entry. Push to
+   `main`.
+2. The `release.yml` workflow detects the version bump, builds NIF
+   tarballs for every target/variant, creates the tag, and uploads the
+   tarballs plus `SHA256SUMS` to the GitHub release.
+3. Locally, regenerate the checksum file from the published assets:
 
-The checksum file is intentionally not tracked between releases: the
-release workflow regenerates and commits it after each tagged build, so
-the file in `main` always corresponds to the most recent published
-artefacts. Never publish locally without first pulling the workflow's
-checksum commit.
+   ```bash
+   mix rustler_precompiled.download WhisperCpp.Native --all --ignore-unavailable --print
+   ```
+
+   This writes `checksum-Elixir.WhisperCpp.Native.exs`. The file is
+   required for `mix hex.publish` but not tracked in git.
+4. Run `mix hex.publish` from a clean tree. The checksum is included in
+   the Hex tarball via `files: ~w(... checksum-*.exs ...)` in `mix.exs`.
