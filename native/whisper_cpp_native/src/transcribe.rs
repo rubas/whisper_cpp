@@ -254,10 +254,10 @@ fn extract_segment(
 
         // Filter timestamp / special tokens. Whisper text tokens occupy
         // [0, 50_257); everything above is reserved.
-        if (0..50_257).contains(&id) {
-            if let Ok(u) = u32::try_from(id) {
-                tokens.push(u);
-            }
+        if (0..50_257).contains(&id)
+            && let Ok(u) = u32::try_from(id)
+        {
+            tokens.push(u);
         }
 
         total_logprob += data.plog;
