@@ -4,6 +4,20 @@ All notable changes to `whisper_cpp` will be documented in this file. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-05-19
+
+### Fixed
+- Whisper text-token boundary is now read per-model from
+  `whisper_token_eot()` at load time instead of being hardcoded to
+  `50_257`. The previous bound was correct for current OpenAI Whisper
+  checkpoints (en-only and multilingual) but would silently mis-filter
+  on a model with a different vocab layout.
+
+### Docs
+- README: ROCm requirement aligned with the release workflow (6.x ->
+  7.x); runtime claim tightened to "Elixir 1.19+ (NIF 2.17, available
+  on OTP 26+)" so it matches `mix.exs`.
+
 ## [0.1.2] - 2026-05-19
 
 ### Fixed
