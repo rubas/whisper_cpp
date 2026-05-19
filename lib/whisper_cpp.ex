@@ -5,13 +5,8 @@ defmodule WhisperCpp do
   Calls into whisper.cpp's C API through the `whisper-rs` Rust crate via
   a Rustler NIF. No `whisper-cli` subprocess, no Python, no temporary
   files. Structured per-segment results, `:initial_prompt` biasing,
-  word-level timestamps, and CUDA / ROCm (hipBLAS) / CPU backends are all
-  first-class.
-
-  Diarization-driven workflows are first-class via `transcribe_slice/4`:
-  hand in the master PCM buffer once, then run many short transcribe
-  calls over per-turn slices with absolute timestamps preserved across
-  the original audio timeline.
+  word-level timestamps, and CUDA / ROCm (hipBLAS) / Metal / CPU
+  backends.
 
   ## Quickstart
 
@@ -30,33 +25,14 @@ defmodule WhisperCpp do
       {:pcm_f32, binary()}
 
   where `binary` is little-endian IEEE-754 `f32` samples, mono, 16 kHz,
-  normalised to `[-1.0, 1.0]`.
-
-  This library does **not** decode audio file formats. Decode WAV / MP3 /
-  FLAC / M4A / Opus / etc. upstream and hand the resulting PCM to
-  `transcribe/3`. ffmpeg is the standard tool:
+  normalised to `[-1.0, 1.0]`. Decode audio file formats (WAV, MP3,
+  FLAC, M4A, Opus, ...) upstream with ffmpeg or similar:
 
       ffmpeg -i input.mp3 -f f32le -ac 1 -ar 16000 - | …
 
-  ## Diarization-driven workflows
-
-  Decode upstream once into a master PCM buffer, then transcribe each
-  diarization turn:
-
-      for {start_s, end_s, _spk} <- turns do
-        {:ok, slice} =
-          WhisperCpp.Pcm.slice(samples, 16_000, start_s, end_s - start_s)
-
-        {:ok, t} =
-          WhisperCpp.transcribe(model, {:pcm_f32, slice},
-            language: "en", word_timestamps: true)
-
-        # `t.segments` carry per-segment times relative to the slice; add
-        # `start_s` for absolute timings.
-      end
-
-  See `WhisperCpp.transcribe_slice/4` for a wrapper that does the slice
-  math and timestamp shift for you.
+  Use `transcribe_slice/4` to transcribe a `[start_s, end_s)` window of an
+  already-decoded master PCM buffer; the returned segment / word times
+  are shifted back into the original audio timeline.
   """
 
   alias WhisperCpp.AbortHandle
@@ -237,12 +213,9 @@ defmodule WhisperCpp do
   returned segment/word timestamps to absolute seconds in the original
   audio.
 
-  The caller decodes the master WAV once; this function slices the f32
-  PCM, runs whisper.cpp on the slice, and rewrites local segment times
-  back into the global timeline so the output integrates with diarization
-  spans without extra bookkeeping.
-
-  Returns `{:ok, %Transcription{}}` with absolute timings, or
+  Slices the f32 PCM buffer, runs whisper.cpp on the slice, and rewrites
+  local segment times back into the absolute timeline. Returns
+  `{:ok, %Transcription{}}` with absolute timings, or
   `{:error, Error.t()}`. Slices shorter than 0.3 s return an empty
   transcription (whisper.cpp pads short inputs and hallucinates into the
   padding).
@@ -268,10 +241,6 @@ defmodule WhisperCpp do
     {:error, Error.new(:invalid_request, "expected a %Model{}, an f32 PCM binary, and a {start_s, end_s} tuple")}
   end
 
-  # Order matters: validate the range itself (non-negative start, end
-  # strictly greater than start) before the short-slice fast path so an
-  # inverted or negative-duration tuple does not silently return an empty
-  # transcription.
   defp validate_slice_range(start_s, _end_s) when start_s < 0,
     do: {:error, Error.new(:invalid_request, "start_s must be >= 0", %{start_s: start_s})}
 

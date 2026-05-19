@@ -35,12 +35,12 @@ consistent set of conventions.
   are rejected with `:invalid_request`. A typo'd path used to turn
   into garbage PCM; the wrapper surfaces the bug instead.
 
-## Per-turn / diarization workflows
+## Slicing PCM
 
-- Decode the source file once upstream into a master PCM buffer.
-- Use `WhisperCpp.transcribe_slice/4` for per-turn transcription -
-  it handles the byte math, runs whisper.cpp on the slice, and
-  shifts segment/word times back into the absolute timeline.
+- Use `WhisperCpp.transcribe_slice/4` to transcribe a `[start_s, end_s)`
+  window of an already-decoded master PCM buffer. It handles the byte
+  math, runs whisper.cpp on the slice, and shifts segment/word times
+  back into the absolute timeline.
 - Slices shorter than 0.3 s return an empty transcription. whisper.cpp
   pads short inputs and hallucinates into the padding; do not pass
   unfiltered VAD output.
@@ -75,8 +75,8 @@ consistent set of conventions.
 - For latency-sensitive workloads, prefer `:single_segment` on short
   clips to skip the segment-split pass.
 - Beam search (`:beam_size > 1`) is roughly 2-3x slower than greedy and
-  worth it for the lowest WER on long-form audio; for per-turn
-  diarization slices, greedy is usually fine.
+  worth it for the lowest WER on long-form audio; for short slices,
+  greedy is usually fine.
 - A single loaded model handle is safe to share: parallel transcribe
   calls do not serialise on the context lock, so saturating a GPU or
   multi-core CPU from many BEAM processes is the expected pattern.

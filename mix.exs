@@ -69,10 +69,6 @@ defmodule WhisperCpp.MixProject do
   @spec deps() :: [tuple()]
   defp deps do
     [
-      # `rustler_precompiled` selects a prebuilt NIF artefact at install time
-      # from the GitHub release matching the package version. `rustler` is
-      # only needed for source builds (`WHISPER_CPP_BUILD=1`) and during
-      # release CI, so it is marked optional.
       {:rustler_precompiled, "~> 0.9.0"},
       {:rustler, "~> 0.37.3", optional: true},
       {:credo, "~> 1.7.18", only: [:dev, :test], runtime: false},

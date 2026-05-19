@@ -7,9 +7,9 @@ Guidance for AI agents working on `whisper_cpp`.
 Elixir bindings for whisper.cpp over a Rustler NIF. The Rust side
 links whisper.cpp through the `whisper-rs` crate; the Elixir side
 wraps it with a typed, validated API plus PCM slicing helpers. Audio
-file decoding is intentionally **out of scope** — the library accepts
+file decoding is intentionally **out of scope** - the library accepts
 only `{:pcm_f32, binary}` (little-endian f32 mono at 16 kHz). Callers
-decode upstream (ffmpeg, bumblebee, …) so multi-stage pipelines share
+decode upstream (ffmpeg, bumblebee, ...) so multi-stage pipelines share
 one decoded PCM buffer.
 
 ## Source-of-truth files
@@ -34,7 +34,7 @@ WhisperCpp.transcribe_slice(Model.t(), pcm_binary, {start_s, end_s}, opts) -> {:
 WhisperCpp.available_devices() -> {:ok, %{backends, gpu_supported}} | {:error, _}
 ```
 
-Audio is `{:pcm_f32, binary}` — little-endian f32 mono at 16 kHz.
+Audio is `{:pcm_f32, binary}` - little-endian f32 mono at 16 kHz.
 Anything else (file paths, bare binaries) is rejected with
 `:invalid_request`. Callers decode upstream.
 

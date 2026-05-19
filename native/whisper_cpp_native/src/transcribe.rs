@@ -1,6 +1,6 @@
 //! Run-one-transcription glue between the NIF entry point and
-//! `whisper-rs` 0.16. Owns the decoding strategy, parameter setting,
-//! and segment/word collection.
+//! `whisper-rs`. Owns the decoding strategy, parameter setting, and
+//! segment/word collection.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -55,10 +55,9 @@ pub(crate) struct TranscriptionResult {
     pub(crate) segments: Vec<SegmentResult>,
 }
 
-/// Saturating, sign-preserving cast for `u32` count-like values handed
-/// to whisper-rs APIs that use `i32`. Realistic values (thread counts,
-/// beam sizes, millisecond offsets) never overflow; the saturation
-/// keeps the cast intent explicit instead of silently wrapping.
+/// Saturating cast for `u32` count-like values handed to whisper-rs
+/// APIs that use `i32`. Realistic values (thread counts, beam sizes,
+/// millisecond offsets) never overflow.
 #[inline]
 fn u32_to_i32(n: u32) -> i32 {
     i32::try_from(n).unwrap_or(i32::MAX)
@@ -129,17 +128,14 @@ fn build_params(req: &TranscribeRequest) -> FullParams<'_, '_> {
 }
 
 /// Wire optional cooperative-cancellation and progress callbacks onto
-/// the `FullParams`. Both hooks are no-ops when the caller omits them,
-/// so existing callsites pay nothing.
+/// the `FullParams`. Both hooks are no-ops when the caller omits them.
 ///
-/// Progress messages cannot be sent directly from the callback: the
-/// callback fires on the dirty-CPU scheduler thread, and
-/// `OwnedEnv::send_and_clear` panics from there. Instead we spawn a
-/// dedicated sender thread per call that owns an `OwnedEnv` and reads
-/// percentages off an `mpsc` channel; the callback only forwards new
-/// values down the channel. When `FullParams` drops at the end of
-/// inference the `Sender` it captured drops, the channel closes, and
-/// the sender thread exits cleanly.
+/// Progress messages cannot be sent directly from the callback because
+/// it fires on the dirty-CPU scheduler thread where
+/// `OwnedEnv::send_and_clear` panics. A dedicated sender thread owns
+/// the `OwnedEnv` and reads percentages off an `mpsc` channel; the
+/// callback only forwards new values. When `FullParams` drops, the
+/// `Sender` drops, the channel closes, and the thread exits.
 fn install_callbacks(
     params: &mut FullParams<'_, '_>,
     abort_flag: Option<Arc<AtomicBool>>,
@@ -173,11 +169,10 @@ fn install_callbacks(
     }
 }
 
-/// Transcribe a single PCM buffer. We hold the context mutex only long
-/// enough to call `create_state()` and then drop it; `WhisperState`
-/// carries its own `Arc<WhisperInnerContext>` so inference proceeds
-/// without serialising other in-flight transcribe calls against the
-/// same loaded model.
+/// Transcribe a single PCM buffer. The context mutex is held only long
+/// enough to call `create_state()`; `WhisperState` then carries its own
+/// `Arc<WhisperInnerContext>`, so parallel transcribes on one loaded
+/// model do not serialise.
 pub(crate) fn transcribe_one(
     ctx: &Mutex<WhisperContext>,
     samples: &[f32],
@@ -214,8 +209,6 @@ pub(crate) fn transcribe_one(
             .unwrap_or_else(|| "en".to_owned())
     };
 
-    // 16 kHz mono f32 PCM: samples.len() / 16_000 with f32 precision.
-    // A 23-bit mantissa covers ~14 days of 16 kHz audio without loss.
     #[allow(clippy::cast_precision_loss)]
     let duration_s = samples.len() as f32 / 16_000.0_f32;
 
@@ -259,13 +252,9 @@ fn extract_segment(
         let data = tok.token_data();
         let id = data.id;
 
-        // Filter timestamp / special tokens out of the public `tokens`
-        // list. The Whisper multilingual vocab caps text tokens at
-        // 50_257; everything above that is reserved (timestamps, lang
-        // tokens, control). The monolingual `*.en` checkpoints share
-        // the same range for normal text.
+        // Filter timestamp / special tokens. Whisper text tokens occupy
+        // [0, 50_257); everything above is reserved.
         if (0..50_257).contains(&id) {
-            // id is in [0, 50_257); u32::try_from never fails here.
             if let Ok(u) = u32::try_from(id) {
                 tokens.push(u);
             }
@@ -301,9 +290,7 @@ fn extract_segment(
             } else if let Some(ref mut word) = current_word {
                 word.text.push_str(&tok_text);
                 word.end = cs_to_s(data.t1);
-                // Keep the worst-token probability as the word
-                // probability, mirroring faster-whisper's per-word
-                // confidence reduction.
+                // Worst-token probability, matching faster-whisper.
                 word.probability = word.probability.min(data.p);
             }
         }
@@ -315,8 +302,6 @@ fn extract_segment(
         buf.push(word);
     }
 
-    // `counted` is a per-segment token count and never approaches f32's
-    // 2^24 precision boundary; the cast is exact for realistic inputs.
     #[allow(clippy::cast_precision_loss)]
     let avg_logprob = if counted > 0 {
         total_logprob / counted as f32
@@ -335,9 +320,7 @@ fn extract_segment(
     })
 }
 
-/// whisper.cpp reports timestamps in centiseconds (10 ms units). Audio
-/// realistically tops out at hours, so i64 -> f32 of these small
-/// integers is exact within precision; flag the lint at the cast.
+/// whisper.cpp reports timestamps in centiseconds (10 ms units).
 #[inline]
 fn cs_to_s(cs: i64) -> f32 {
     #[allow(clippy::cast_precision_loss)]

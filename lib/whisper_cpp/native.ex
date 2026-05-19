@@ -19,7 +19,6 @@ defmodule WhisperCpp.Native do
     crate: "whisper_cpp_native",
     base_url: "https://github.com/rubas/whisper_cpp/releases/download/v#{@version}",
     version: @version,
-    # Opt-in source build; toggled by env or umbrella config.
     force_build:
       System.get_env("WHISPER_CPP_BUILD") in ["1", "true"] or
         Application.compile_env(:rustler_precompiled, [:force_build, :whisper_cpp], false),
@@ -29,9 +28,6 @@ defmodule WhisperCpp.Native do
       x86_64-unknown-linux-gnu
       aarch64-unknown-linux-gnu
     ),
-    # Variant matrix: every target ships a default CPU artefact; x86_64 and
-    # aarch64 Linux also ship `--cuda` and `--hipblas` variants for GPU
-    # acceleration. Selected at install time via WHISPER_CPP_VARIANT.
     variants: %{
       "x86_64-unknown-linux-gnu" => [
         cuda: fn -> System.get_env("WHISPER_CPP_VARIANT") == "cuda" end,
