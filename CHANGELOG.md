@@ -4,6 +4,21 @@ All notable changes to `whisper_cpp` will be documented in this file. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-05-19
+
+### Fixed
+- `--hipblas` release artefact now actually carries the gfx1100-1201
+  device kernels declared in v0.1.1. The release workflow had been
+  reusing `actions/cache` across version bumps, restoring a stale
+  `native/whisper_cpp_native/target/` tree whose cmake build state
+  predated the `AMDGPU_TARGETS` env vars. The new HIP arch list was
+  visible to cmake configure but the cached HIP object files never
+  recompiled, so the published `.so` shipped with the old arch list
+  baked in and gfx1200/gfx1201 GPUs still crashed at the first kernel
+  launch. The cache now only covers the cargo registry; the build
+  tree is rebuilt from scratch each release, and a post-build check
+  fails the workflow if `.hip_fatbin` is suspiciously small.
+
 ## [0.1.1] - 2026-05-19
 
 ### Fixed

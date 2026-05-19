@@ -211,15 +211,19 @@ jobs:
           echo "GPU_TARGETS=$AMDGPU_ARCHS" >> "$GITHUB_ENV"
           echo "AMDGPU_TARGETS=$AMDGPU_ARCHS" >> "$GITHUB_ENV"
 
+      # Cache only the cargo registry, not target/. Caching the native
+      # build tree across releases is fragile: ggml's HIP backend reads
+      # AMDGPU_TARGETS through CMake imported targets, and a stale build
+      # tree from an earlier arch list silently keeps the old kernels
+      # baked into the fatbin. Workflow-file hash is included so any
+      # toolchain change cleanly invalidates downstream caches too.
       - name: Cargo cache
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
-            native/whisper_cpp_native/target
-          key: release-${{ matrix.id }}-${{ hashFiles('native/whisper_cpp_native/Cargo.lock') }}
-          restore-keys: release-${{ matrix.id }}-
+          key: release-${{ matrix.id }}-${{ hashFiles('native/whisper_cpp_native/Cargo.lock', '.github/workflows/release.yml') }}
 
       - name: Build NIF
         working-directory: native/whisper_cpp_native
@@ -231,6 +235,30 @@ jobs:
             cargo build --release --target "$TARGET" --features "$FEATURES"
           else
             cargo build --release --target "$TARGET"
+          fi
+
+      # Sanity check: a real hipBLAS build with the gfx1100-1201 arch
+      # set embeds ~15 MiB of compressed device code. If the build
+      # silently fell back to an empty arch list (legacy hipcc default
+      # or a stale cmake state), the .hip_fatbin section shrinks to a
+      # few hundred KB and kernel launches die at runtime. Fail the
+      # release before publishing rather than ship a broken artefact.
+      - name: Verify HIP fatbin includes device code
+        if: matrix.install_rocm
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          SO="native/whisper_cpp_native/target/${TARGET}/release/libwhisper_cpp_native.so"
+          SIZE_HEX=$(objdump -h "$SO" | awk '$2 == ".hip_fatbin" {print $3}')
+          if [ -z "$SIZE_HEX" ]; then
+            echo "::error::.hip_fatbin section missing from $SO"
+            exit 1
+          fi
+          SIZE=$((16#$SIZE_HEX))
+          echo "hip_fatbin size: $SIZE bytes"
+          if [ "$SIZE" -lt 5242880 ]; then
+            echo "::error::.hip_fatbin section is $SIZE bytes (< 5 MiB); arch list likely missing — refusing to publish"
+            exit 1
           fi
 
       - name: Create tarball
