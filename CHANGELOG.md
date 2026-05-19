@@ -4,6 +4,16 @@ All notable changes to `whisper_cpp` will be documented in this file. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-05-19
+
+### Fixed
+- Precompiled `--hipblas` NIF now ships device code for the full
+  RDNA 3 / RDNA 4 consumer line (`gfx1100`, `gfx1101`, `gfx1102`,
+  `gfx1103`, `gfx1200`, `gfx1201`). Previously the release build
+  picked ggml's default arch list, which omitted gfx1200 / gfx1201,
+  so RX 9000-series cards loaded the model and detected the GPU but
+  crashed on the first kernel launch with a missing device kernel.
+
 ## [0.1.0] - 2026-05-18
 
 ### Added

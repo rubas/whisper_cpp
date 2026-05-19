@@ -200,6 +200,16 @@ jobs:
           echo "PATH=/opt/rocm/bin:$PATH" >> "$GITHUB_ENV"
           echo "ROCM_PATH=/opt/rocm" >> "$GITHUB_ENV"
           echo "HIP_PATH=/opt/rocm" >> "$GITHUB_ENV"
+          # Emit device code for the full RDNA 3 / RDNA 4 consumer line.
+          # ggml's HIP backend defaults to an older arch list that omits
+          # gfx1200 / gfx1201 (RX 9000-series, RDNA 4), so kernel launches
+          # fail at runtime on those cards even though the .so loads and
+          # hipBLAS reports the GPU. Both GPU_TARGETS (current ggml/llama
+          # convention) and AMDGPU_TARGETS (legacy) are honoured by the
+          # upstream CMake.
+          AMDGPU_ARCHS="gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201"
+          echo "GPU_TARGETS=$AMDGPU_ARCHS" >> "$GITHUB_ENV"
+          echo "AMDGPU_TARGETS=$AMDGPU_ARCHS" >> "$GITHUB_ENV"
 
       - name: Cargo cache
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
