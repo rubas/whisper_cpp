@@ -177,6 +177,7 @@ pub(crate) fn transcribe_one(
     ctx: &Mutex<WhisperContext>,
     samples: &[f32],
     request: &TranscribeRequest,
+    token_eot: u32,
     abort_flag: Option<Arc<AtomicBool>>,
     progress_pid: Option<LocalPid>,
 ) -> anyhow::Result<TranscriptionResult> {
@@ -198,7 +199,7 @@ pub(crate) fn transcribe_one(
     let mut segments = Vec::with_capacity(n_segments);
 
     for seg in state.as_iter() {
-        segments.push(extract_segment(&seg, request.word_timestamps)?);
+        segments.push(extract_segment(&seg, request.word_timestamps, token_eot)?);
     }
 
     let language = {
@@ -222,6 +223,7 @@ pub(crate) fn transcribe_one(
 fn extract_segment(
     seg: &whisper_rs::WhisperSegment<'_>,
     word_timestamps: bool,
+    token_eot: u32,
 ) -> anyhow::Result<SegmentResult> {
     let text = seg
         .to_str_lossy()
@@ -252,10 +254,13 @@ fn extract_segment(
         let data = tok.token_data();
         let id = data.id;
 
-        // Filter timestamp / special tokens. Whisper text tokens occupy
-        // [0, 50_257); everything above is reserved.
-        if (0..50_257).contains(&id)
-            && let Ok(u) = u32::try_from(id)
+        // Keep only text tokens. Whisper packs the vocab as
+        // [text | <|endoftext|> | language | task | timestamp]; the eot
+        // id is the first non-text token, so `id < token_eot` is the
+        // boundary. Read per-model at load time to track checkpoint
+        // variants instead of hardcoding 50_257.
+        if let Ok(u) = u32::try_from(id)
+            && u < token_eot
         {
             tokens.push(u);
         }

@@ -84,6 +84,11 @@ struct WhisperResource {
     sampling_rate: usize,
     multilingual: bool,
     n_vocab: usize,
+    /// `<|endoftext|>` token id - text tokens occupy `[0, token_eot)`,
+    /// everything above is timestamp / language / control. Read from the
+    /// loaded model at load time so the boundary stays correct across
+    /// checkpoint variants (en-only vs multilingual vs future vocabs).
+    token_eot: u32,
     device: &'static str,
 }
 
@@ -285,12 +290,14 @@ fn nif_load_model(env: Env<'_>, path: String, opts: LoadOpts) -> Term<'_> {
         let sampling_rate = 16_000_usize;
         let multilingual = ctx.is_multilingual();
         let n_vocab = usize::try_from(ctx.n_vocab()).unwrap_or(0);
+        let token_eot = u32::try_from(ctx.token_eot()).unwrap_or(u32::MAX);
 
         Ok(ResourceArc::new(WhisperResource {
             ctx: Mutex::new(ctx),
             sampling_rate,
             multilingual,
             n_vocab,
+            token_eot,
             device: device_label,
         }))
     });
@@ -368,8 +375,14 @@ fn nif_transcribe<'a>(
     let result = run_with_panic_protection(|| {
         let samples = decode_pcm_f32(bytes)?;
         let request = build_request(opts);
-        let transcription =
-            transcribe::transcribe_one(&model.ctx, &samples, &request, abort_flag, progress_pid)?;
+        let transcription = transcribe::transcribe_one(
+            &model.ctx,
+            &samples,
+            &request,
+            model.token_eot,
+            abort_flag,
+            progress_pid,
+        )?;
         Ok(NifTranscription::from(transcription))
     });
 
