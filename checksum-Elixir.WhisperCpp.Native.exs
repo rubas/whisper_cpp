@@ -1,8 +1,8 @@
 %{
-  "libwhisper_cpp_native-v0.1.1-nif-2.17-aarch64-apple-darwin.so.tar.gz" => "sha256:68070f153744d2a4b1ac3d2d1c952344a8c98dbc922616492326e38571cd8c35",
-  "libwhisper_cpp_native-v0.1.1-nif-2.17-aarch64-unknown-linux-gnu--cuda.so.tar.gz" => "sha256:6588f93b6fc3873ef79ec8f4bc4f4dd364fd8dc1923a43dac30d9ef72c52a0a0",
-  "libwhisper_cpp_native-v0.1.1-nif-2.17-aarch64-unknown-linux-gnu.so.tar.gz" => "sha256:ea93fc0f78a568f0b92da01f618d183a53b3eb316ddbc0dc7069c274b200cf7d",
-  "libwhisper_cpp_native-v0.1.1-nif-2.17-x86_64-unknown-linux-gnu--cuda.so.tar.gz" => "sha256:49402bab626b6c312d4e9f64c9bfeabd0e34eb021b8a5232350b4c3a0eebbe8a",
-  "libwhisper_cpp_native-v0.1.1-nif-2.17-x86_64-unknown-linux-gnu--hipblas.so.tar.gz" => "sha256:a0aff5d527e08df69ebc94d6aa8109e427ff5c273a80a39d9653db1971742393",
-  "libwhisper_cpp_native-v0.1.1-nif-2.17-x86_64-unknown-linux-gnu.so.tar.gz" => "sha256:19d3cf8efedca6f30bea67b08a6cca73aaa26c242a810eb0ff5874647cf07669",
+  "libwhisper_cpp_native-v0.1.2-nif-2.17-aarch64-apple-darwin.so.tar.gz" => "sha256:ac98d7b56a27ec0fa0c90ba65a8b4c4d3202cb6fedd4e0dd606d840102684544",
+  "libwhisper_cpp_native-v0.1.2-nif-2.17-aarch64-unknown-linux-gnu--cuda.so.tar.gz" => "sha256:dba2feec3e2e380b50f677fc38ed7db4bbfeef0c81e7ff29bd2c5656129aa1cf",
+  "libwhisper_cpp_native-v0.1.2-nif-2.17-aarch64-unknown-linux-gnu.so.tar.gz" => "sha256:fe4cc4134f09868d41d1578fc2cd05308c5a73ea2ca22798d46f43c14d2e554c",
+  "libwhisper_cpp_native-v0.1.2-nif-2.17-x86_64-unknown-linux-gnu--cuda.so.tar.gz" => "sha256:2dd324e78758de5612b25f6efec8dc198163c088f17dfebb82a0b939b7f767d7",
+  "libwhisper_cpp_native-v0.1.2-nif-2.17-x86_64-unknown-linux-gnu--hipblas.so.tar.gz" => "sha256:b29479bce676159fe8aeab26bb03789b71f3247ff546da0cfe71996807cd7c3f",
+  "libwhisper_cpp_native-v0.1.2-nif-2.17-x86_64-unknown-linux-gnu.so.tar.gz" => "sha256:e343d79320437567f69c04e79ec2525c4cd77ccf64f33a6a8f18ce27800cbb8f",
 }
