@@ -47,7 +47,7 @@ backends so users select them at install time via `WHISPER_CPP_VARIANT`.
 | Feature      | Selected by                       | SDK requirement at build time   |
 | ------------ | --------------------------------- | ------------------------------- |
 | `cuda`       | `WHISPER_CPP_VARIANT=cuda`        | CUDA toolkit 12+                |
-| `hipblas`    | `WHISPER_CPP_VARIANT=hipblas`     | ROCm 6.x, `hipblas-dev`         |
+| `hipblas`    | `WHISPER_CPP_VARIANT=hipblas`     | ROCm 7.x, `hipblas-dev`         |
 | `vulkan`     | source build                      | Vulkan loader / headers         |
 | `metal`      | default on `aarch64-apple-darwin` | Xcode CLT                       |
 | `coreml`     | source build                      | Xcode + Core ML tools           |
