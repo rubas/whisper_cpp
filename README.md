@@ -17,7 +17,7 @@ end
 
 Installation downloads a precompiled NIF artefact matching your target triple
 from the project's GitHub releases. No Rust toolchain or CMake is needed on
-the consumer side. Requires OTP 26 or newer (NIF 2.17).
+the consumer side. Requires Elixir 1.19+ (NIF 2.17, available on OTP 26+).
 
 ### Source builds
 
@@ -35,7 +35,7 @@ Backend-specific SDKs are only needed when you opt in to that backend:
 | -------------- | ------------------------------------ | -------------------------------------------- |
 | _(none)_       | Pure CPU (SIMD: AVX2 / NEON)         | -                                            |
 | `cuda`         | NVIDIA GPU via CUDA                  | CUDA toolkit 12+                             |
-| `hipblas`      | AMD GPU via ROCm hipBLAS             | ROCm 6.x, `hipblas-dev`, `rocblas-dev`       |
+| `hipblas`      | AMD GPU via ROCm hipBLAS             | ROCm 7.x, `hipblas-dev`, `rocblas-dev`       |
 | `vulkan`       | Cross-vendor GPU via Vulkan          | Vulkan loader + headers                      |
 | `metal`        | Apple Silicon GPU                    | Xcode CLT                                    |
 | `coreml`       | Apple Neural Engine (encoder)        | Xcode + Core ML tools                        |
