@@ -315,7 +315,16 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+          # Refresh main right before commit so we apply on top of any
+          # commits that landed during the build window. The file was
+          # produced by the previous step; preserve it across the reset.
+          cp checksum-Elixir.WhisperCpp.Native.exs "${RUNNER_TEMP}/checksum.exs"
+          git fetch origin main
+          git reset --hard origin/main
+          cp "${RUNNER_TEMP}/checksum.exs" checksum-Elixir.WhisperCpp.Native.exs
+
           git add checksum-Elixir.WhisperCpp.Native.exs
           git diff --cached --quiet && echo "No checksum changes" && exit 0
           git commit -m "chore: update NIF checksum for $TAG"
-          git push
+          git push origin HEAD:main
