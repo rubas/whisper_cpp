@@ -3,13 +3,9 @@
 `whisper_cpp` is an Elixir library for running OpenAI Whisper speech-to-text
 models inside the BEAM via [whisper.cpp](https://github.com/ggerganov/whisper.cpp).
 It calls whisper.cpp's C API through a Rustler NIF (using the
-[`whisper-rs`](https://github.com/tazz4843/whisper-rs) crate), so Elixir code can
-transcribe WAV files or f32 PCM buffers without spawning a `whisper-cli`
+[`whisper-rs`](https://github.com/tazz4843/whisper-rs) crate), so Elixir code
+can transcribe 16 kHz mono f32 PCM buffers without spawning a `whisper-cli`
 subprocess, writing temporary files, or shipping Python.
-
-Diarization-driven workflows are first-class: decode a master WAV once, then
-run many short transcribe calls over per-turn slices with absolute timestamps
-preserved across the original audio timeline.
 
 ## Installation
 
@@ -21,13 +17,7 @@ end
 
 Installation downloads a precompiled NIF artefact matching your target triple
 from the project's GitHub releases. No Rust toolchain or CMake is needed on
-the consumer side.
-
-### Supported runtime
-
-Precompiled NIF artefacts target **Erlang NIF version 2.17** (OTP 26+,
-including OTP 29). Consumers running older OTP releases must build the NIF
-from source by setting `WHISPER_CPP_BUILD=1`.
+the consumer side. Requires OTP 26 or newer (NIF 2.17).
 
 ### Source builds
 
@@ -71,12 +61,6 @@ For example, to pull the CUDA build on an x86_64 Linux host:
 WHISPER_CPP_VARIANT=cuda mix deps.compile whisper_cpp
 ```
 
-For the AMD ROCm build:
-
-```bash
-WHISPER_CPP_VARIANT=hipblas mix deps.compile whisper_cpp
-```
-
 x86_64 macOS and Windows are not shipped as precompiled binaries. Other
 backends (`vulkan`, `coreml`, `intel-sycl`, `openblas`, `openmp`) are not
 in the precompiled matrix; build them from source.
@@ -95,10 +79,9 @@ WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=openmp     mix compile  # CPU + OpenMP
 WHISPER_CPP_BUILD=1                                 mix compile  # Pure CPU
 ```
 
-Pick **one** acceleration backend per build. The features are mutually
-exclusive at runtime - the chosen backend is baked into the compiled
-artefact. The `Taskfile.yml` ships `task build:cpu`, `task build:cuda`,
-and `task build:hipblas` shortcuts.
+Pick one accelerator per build; the backend is baked into the artefact.
+The `Taskfile.yml` ships `task build:cpu`, `task build:cuda`, and
+`task build:hipblas` shortcuts.
 
 ### Runtime device selection
 
@@ -112,9 +95,9 @@ WhisperCpp.available_devices()
   )
 ```
 
-`:auto` picks the GPU backend if the artefact has one compiled in;
-otherwise CPU. Explicitly requesting a backend that was not compiled
-returns `{:error, %WhisperCpp.Error{reason: :invalid_request}}`.
+`:auto` picks the GPU backend if the artefact has one compiled in; otherwise
+CPU. Explicitly requesting a backend that was not compiled returns
+`{:error, %WhisperCpp.Error{reason: :invalid_request}}`.
 
 ## Models
 
@@ -134,10 +117,9 @@ Both legacy `.bin` (GGML) and `.gguf` files are supported.
 ```elixir
 {:ok, model} = WhisperCpp.load_model("models/ggml-large-v3.bin")
 
-# Decode upstream (ffmpeg, bumblebee, whatever) into 16 kHz mono f32 PCM.
-pcm =
-  File.read!("jfk.pcm")  # produced by:
-                         #   ffmpeg -i jfk.wav -f f32le -ac 1 -ar 16000 jfk.pcm
+# Decode upstream (ffmpeg, bumblebee, ...) into 16 kHz mono f32 PCM.
+pcm = File.read!("jfk.pcm")
+# produced by: ffmpeg -i jfk.wav -f f32le -ac 1 -ar 16000 jfk.pcm
 
 {:ok, %WhisperCpp.Transcription{text: text, segments: segs}} =
   WhisperCpp.transcribe(model, {:pcm_f32, pcm}, language: "en")
@@ -146,14 +128,13 @@ IO.puts(text)
 # => "And so, my fellow Americans, ask not what your country can do for you ..."
 
 for s <- segs do
-  IO.puts("[#{s.start}-#{s.end}] (no_speech=#{Float.round(s.no_speech_prob, 3)}) #{s.text}")
+  IO.puts("[#{s.start}-#{s.end}] #{s.text}")
 end
 ```
 
-`%WhisperCpp.Segment{}` carries absolute `:start` / `:end` seconds,
-`:no_speech_prob`, `:avg_logprob`, the underlying text token IDs, and
-(when `:word_timestamps` is on) a list of `%WhisperCpp.Word{}` with
-per-word timing.
+`%WhisperCpp.Segment{}` carries `:start` / `:end` seconds, `:no_speech_prob`,
+`:avg_logprob`, the underlying text token IDs, and (when `:word_timestamps`
+is on) a list of `%WhisperCpp.Word{}` with per-word timing.
 
 ### Audio contract
 
@@ -162,9 +143,9 @@ per-word timing.
     {:pcm_f32, binary()}
 
 where `binary` is little-endian IEEE-754 `f32` samples, mono, 16 kHz,
-normalised to `[-1.0, 1.0]`. This library does **not** decode audio
-file formats — decode WAV / MP3 / FLAC / M4A / Opus / etc. upstream and
-hand the PCM in. Standard recipes:
+normalised to `[-1.0, 1.0]`. This library does **not** decode audio file
+formats - decode WAV / MP3 / FLAC / M4A / Opus / etc. upstream and hand the
+PCM in:
 
 ```bash
 ffmpeg -i input.mp3  -f f32le -ac 1 -ar 16000 input.pcm
@@ -172,33 +153,24 @@ ffmpeg -i input.m4a  -f f32le -ac 1 -ar 16000 input.pcm
 ffmpeg -i input.opus -f f32le -ac 1 -ar 16000 input.pcm
 ```
 
-Keeping decoding out of `whisper_cpp` means a diarization → VAD →
-transcription pipeline decodes once and shares the PCM across stages,
-instead of every stage bundling its own (potentially divergent)
-decoder.
+### Slicing PCM
 
-### Diarization-driven workflows
+`transcribe_slice/4` runs whisper.cpp on a `[start_s, end_s)` window of an
+already-decoded master PCM buffer and rewrites the returned segment / word
+times back into the absolute timeline of the source audio. Slices shorter
+than 0.3 s return an empty transcription (whisper.cpp pads short inputs and
+hallucinates into the padding).
 
 ```elixir
 pcm = File.read!("call.pcm")
 
-results =
-  for {start_s, end_s, speaker} <- diar_turns do
-    {:ok, t} =
-      WhisperCpp.transcribe_slice(model, pcm, {start_s, end_s},
-        language: "en",
-        word_timestamps: true,
-        n_threads: 4
-      )
-
-    {speaker, t}
-  end
+{:ok, t} =
+  WhisperCpp.transcribe_slice(model, pcm, {start_s, end_s},
+    language: "en",
+    word_timestamps: true,
+    n_threads: 4
+  )
 ```
-
-`transcribe_slice/4` slices the PCM, runs whisper.cpp on the slice, and
-rewrites the segment/word times back into the absolute timeline of the
-original audio. Slices shorter than 0.3 s return an empty transcription
-(whisper.cpp pads short inputs and hallucinates into the padding).
 
 ### Decoding biases
 
@@ -231,10 +203,21 @@ WhisperCpp.transcribe(model, {:pcm_f32, pcm},
 | `:suppress_non_speech_tokens`   | `boolean`         | Suppress music/noise tokens.                           |
 | `:single_segment`               | `boolean`         | Force a single segment for the whole audio.            |
 | `:print_progress`               | `boolean`         | whisper.cpp progress to stderr.                        |
+| `:abort_handle`                 | `AbortHandle.t`   | Cooperative cancellation (see below).                  |
+| `:progress_pid`                 | `pid`             | Receives `{:whisper_progress, percent}` messages.      |
 
 Unknown option keys and out-of-range values return
 `{:error, %WhisperCpp.Error{reason: :invalid_request}}` before reaching
 the NIF.
+
+## Cancellation and progress
+
+Mint a `%WhisperCpp.AbortHandle{}` and pass it via `:abort_handle` to ask
+in-flight inference to stop early; the call returns
+`{:ok, partial_transcription}` with whatever segments completed before
+whisper.cpp's next abort poll. Pass `:progress_pid` (commonly `self()`
+inside a `Task`) to receive `{:whisper_progress, percent}` messages
+(0..100) as work advances; duplicate percentages are coalesced.
 
 ## Errors
 

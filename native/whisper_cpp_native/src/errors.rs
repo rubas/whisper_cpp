@@ -1,6 +1,5 @@
-//! Lightweight error categorisation. Attaches an error-kind tag to
-//! `anyhow::Error` chains so the NIF entry point can map back to a
-//! structured Elixir reason atom.
+//! Attaches an error-kind tag to `anyhow::Error` chains so the NIF
+//! entry point can map back to a structured Elixir reason atom.
 
 use anyhow::Context as _;
 
@@ -15,8 +14,8 @@ impl std::fmt::Display for Kind {
     }
 }
 
-// Required so `anyhow::Error::chain().downcast_ref::<Kind>()` can match
-// this context tag - `downcast_ref` is bounded by `std::error::Error`.
+// Required so `anyhow::Error::chain().downcast_ref::<Kind>()` matches
+// this tag - `downcast_ref` is bounded by `std::error::Error`.
 impl std::error::Error for Kind {}
 
 pub(crate) fn inference_error<E>(err: E) -> anyhow::Error

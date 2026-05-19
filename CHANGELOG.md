@@ -11,19 +11,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `WhisperCpp.load_model/2`: GGML/GGUF model loading with
   `:cpu`, `:cuda`, `:hipblas`, `:vulkan`, `:metal`, `:coreml`,
   `:intel_sycl`, `:auto` device selection.
-- `WhisperCpp.transcribe/3`: full whisper.cpp transcription on `.wav`
-  paths and `{:pcm_f32, binary}` buffers with segment + token output.
-- `WhisperCpp.transcribe_slice/4`: time-shifted per-slice transcription
-  for diarization-driven workflows.
+- `WhisperCpp.transcribe/3`: full whisper.cpp transcription on
+  `{:pcm_f32, binary}` buffers with segment + token output.
+- `WhisperCpp.transcribe_slice/4`: time-shifted per-slice transcription.
 - `WhisperCpp.AbortHandle`: cooperative cancellation. Pass an
   `%AbortHandle{}` via `:abort_handle` and call `AbortHandle.abort/1`
   from another process to stop in-flight inference.
 - `:progress_pid` transcribe option: receive `{:whisper_progress, pct}`
   messages as work advances; duplicate percentages are coalesced.
-- `WhisperCpp.Pcm`: PCM slicing helpers for diarization-driven
-  workflows. `transcribe/3` accepts only `{:pcm_f32, binary}` (little-
-  endian f32 mono at 16 kHz); callers decode audio files upstream so
-  multi-stage pipelines share one decoded buffer.
+- `WhisperCpp.Pcm`: PCM slicing helpers. `transcribe/3` accepts only
+  `{:pcm_f32, binary}` (little-endian f32 mono at 16 kHz); callers
+  decode audio files upstream.
 - `WhisperCpp.available_devices/0`: backend introspection for the
   loaded NIF artefact.
 - `:word_timestamps` option for per-word timing.

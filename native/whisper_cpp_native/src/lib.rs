@@ -30,8 +30,7 @@ mod atoms {
 use atoms::{error, ok};
 
 /// `Some(label)` when this build was compiled with a GPU cargo feature.
-/// At most one GPU backend is active per artefact; selection is
-/// build-time.
+/// At most one GPU backend is active per artefact.
 const GPU_BACKEND: Option<&str> = if cfg!(feature = "cuda") {
     Some("cuda")
 } else if cfg!(feature = "hipblas") {
@@ -77,11 +76,9 @@ impl From<anyhow::Error> for NativeError {
     }
 }
 
-/// Opaque BEAM resource holding a loaded whisper.cpp context.
-///
-/// `WhisperContext` is `Send + Sync` per `whisper-rs`. The
-/// [`parking_lot::Mutex`] only wraps the brief `create_state()` step;
-/// inference runs without it. See `transcribe::transcribe_one`.
+/// Opaque BEAM resource holding a loaded whisper.cpp context. The mutex
+/// only wraps the brief `create_state()` step; inference itself runs
+/// without it. See `transcribe::transcribe_one`.
 struct WhisperResource {
     ctx: Mutex<WhisperContext>,
     sampling_rate: usize,
@@ -92,10 +89,8 @@ struct WhisperResource {
 
 impl rustler::Resource for WhisperResource {}
 
-/// Cooperative cancellation flag handed to `transcribe`. Elixir can call
-/// `nif_abort_handle_signal/1` from another process to ask the running
-/// inference to stop; whisper.cpp polls the abort callback between
-/// encoder/decoder steps and returns early.
+/// Cooperative cancellation flag. whisper.cpp polls the abort callback
+/// between encoder/decoder steps and returns early when set.
 pub(crate) struct AbortHandle {
     pub(crate) flag: Arc<AtomicBool>,
 }
@@ -286,7 +281,7 @@ fn nif_load_model(env: Env<'_>, path: String, opts: LoadOpts) -> Term<'_> {
         })?;
 
         // whisper.cpp's published checkpoints all run at 16 kHz; the C
-        // API does not expose the rate so we hardcode it.
+        // API does not expose the rate.
         let sampling_rate = 16_000_usize;
         let multilingual = ctx.is_multilingual();
         let n_vocab = usize::try_from(ctx.n_vocab()).unwrap_or(0);
@@ -356,12 +351,8 @@ fn build_request(opts: TranscribeOpts) -> TranscribeRequest {
 }
 
 /// Transcribes a single PCM buffer. The buffer may be longer than the
-/// 30 s Whisper window; whisper.cpp chunks internally.
-///
-/// `abort` and `progress_pid` are optional cooperative hooks: if `abort`
-/// flips to `true` during inference, whisper.cpp returns early; if
-/// `progress_pid` is set, the inference sends
-/// `{:whisper_progress, percent}` messages to that pid as work advances.
+/// 30 s Whisper window; whisper.cpp chunks internally. `abort` and
+/// `progress_pid` are optional cooperative hooks.
 #[rustler::nif(schedule = "DirtyCpu")]
 #[allow(clippy::needless_pass_by_value)]
 fn nif_transcribe<'a>(

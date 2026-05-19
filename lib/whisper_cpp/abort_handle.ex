@@ -7,20 +7,6 @@ defmodule WhisperCpp.AbortHandle do
   whisper.cpp polls the abort flag between encoder/decoder steps; the
   returned `%Transcription{}` contains whatever segments had been
   produced before the abort took effect.
-
-      handle = WhisperCpp.AbortHandle.new()
-
-      task =
-        Task.async(fn ->
-          WhisperCpp.transcribe(model, {:pcm_f32, pcm}, abort_handle: handle)
-        end)
-
-      Process.send_after(self(), :timeout, 30_000)
-      receive do
-        :timeout -> WhisperCpp.AbortHandle.abort(handle)
-      end
-
-      Task.await(task)
   """
 
   alias WhisperCpp.Native
