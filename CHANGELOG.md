@@ -4,6 +4,16 @@ All notable changes to `whisper_cpp` will be documented in this file. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-05-20
+
+### Fixed
+- `transcribe/3` now honours the documented `{:ok, partial_transcription}`
+  contract when inference is cancelled through `:abort_handle`. whisper.cpp's
+  `full()` returns an error on abort, which was propagated as
+  `:inference_error`; the NIF now detects that the caller requested the abort
+  and returns the segments produced before cancellation. A genuine inference
+  failure (no abort requested) still returns `:inference_error`.
+
 ## [0.1.3] - 2026-05-19
 
 ### Fixed
