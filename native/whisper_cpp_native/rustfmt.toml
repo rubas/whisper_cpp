@@ -1,0 +1,7 @@
+# Pin rustfmt to the 2024 style edition so the import ordering it
+# produces matches the Cargo edition declared in Cargo.toml. Without
+# this, rustfmt invocations that don't read Cargo.toml (e.g. some
+# editor / pre-commit hook setups) fall back to the 2015 style and
+# sort `use` items case-insensitively, which then disagrees with what
+# `cargo fmt` produces here and what CI checks.
+style_edition = "2024"

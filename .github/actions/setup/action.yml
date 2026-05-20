@@ -1,0 +1,101 @@
+name: "Setup whisper_cpp build env"
+description: "System packages, Task, Elixir/OTP, Rust toolchain, sccache, and the mix/cargo/native caches."
+
+inputs:
+  elixir-version:
+    description: "Elixir version"
+    required: true
+  otp-version:
+    description: "OTP version"
+    required: true
+  rust-toolchain:
+    description: "Rust toolchain version"
+    required: true
+  rust-components:
+    description: "Comma-separated rustup components (e.g. 'rustfmt, clippy')"
+    required: false
+    default: ""
+  cache-fixtures:
+    description: "Set to 'true' to cache the integration-test fixtures"
+    required: false
+    default: "false"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install system packages
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq cmake build-essential pkg-config libclang-dev
+
+    - name: Install Task
+      uses: go-task/setup-task@3be4020d41929789a01026e0e427a4321ce0ad44 # v2
+
+    - name: Setup Elixir/OTP
+      uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
+      with:
+        elixir-version: ${{ inputs.elixir-version }}
+        otp-version: ${{ inputs.otp-version }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+      with:
+        toolchain: ${{ inputs.rust-toolchain }}
+        components: ${{ inputs.rust-components }}
+
+    - name: Install sccache
+      uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+    - name: Enable sccache wrapping
+      shell: bash
+      run: |
+        echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+        echo "CC=sccache cc" >> "$GITHUB_ENV"
+        echo "CXX=sccache c++" >> "$GITHUB_ENV"
+
+    - name: Cache Elixir build + deps
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: |
+          _build
+          deps
+        key: ${{ runner.os }}-mix-${{ inputs.elixir-version }}-${{ inputs.otp-version }}-${{ hashFiles('**/mix.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-mix-${{ inputs.elixir-version }}-${{ inputs.otp-version }}-
+
+    - name: Cache Cargo registry + git
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ runner.os }}-cargo-${{ inputs.rust-toolchain }}-${{ hashFiles('native/whisper_cpp_native/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ inputs.rust-toolchain }}-
+
+    - name: Cache native build artifacts (Cargo target + CMake)
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: |
+          native/whisper_cpp_native/target
+        key: ${{ runner.os }}-native-${{ inputs.rust-toolchain }}-${{ hashFiles('native/whisper_cpp_native/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-native-${{ inputs.rust-toolchain }}-
+
+    - name: Cache integration fixtures (model + audio)
+      if: ${{ inputs.cache-fixtures == 'true' }}
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: |
+          test/fixtures/ggml-tiny.en.bin
+          test/fixtures/jfk.wav
+        key: ${{ runner.os }}-fixtures-v1
+
+    - name: Install Hex/Rebar + fetch deps
+      shell: bash
+      run: |
+        mix local.hex --force
+        mix local.rebar --force
+        mix deps.get
