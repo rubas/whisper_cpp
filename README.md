@@ -1,11 +1,10 @@
 # whisper_cpp
 
-`whisper_cpp` is an Elixir library for running OpenAI Whisper speech-to-text
-models inside the BEAM via [whisper.cpp](https://github.com/ggerganov/whisper.cpp).
-It calls whisper.cpp's C API through a Rustler NIF (using the
-[`whisper-rs`](https://github.com/tazz4843/whisper-rs) crate), so Elixir code
-can transcribe 16 kHz mono f32 PCM buffers without spawning a `whisper-cli`
-subprocess, writing temporary files, or shipping Python.
+A thin Elixir wrapper around [`whisper-rs`](https://codeberg.org/tazz4843/whisper-rs),
+the Rust bindings to [whisper.cpp](https://github.com/ggerganov/whisper.cpp).
+It exposes whisper.cpp speech-to-text to the BEAM through a Rustler NIF: load a
+model, hand it 16 kHz mono f32 PCM, get structured segments back. No subprocess,
+no Python, no temporary files.
 
 ## Installation
 
@@ -15,236 +14,62 @@ def deps do
 end
 ```
 
-Installation downloads a precompiled NIF artefact matching your target triple
-from the project's GitHub releases. No Rust toolchain or CMake is needed on
-the consumer side. Requires Elixir 1.19+ (NIF 2.17, available on OTP 26+).
-
-### Source builds
-
-Set `WHISPER_CPP_BUILD=1` in your environment (or
-`config :rustler_precompiled, :force_build, whisper_cpp: true`) to compile
-from source. Base requirements:
-
-- Rust toolchain (`rustup`, stable >= 1.91)
-- `cmake`, a C++17 compiler, `make`
-- `pkg-config`, `libclang` (for `bindgen`)
-
-Backend-specific SDKs are only needed when you opt in to that backend:
-
-| Cargo feature  | Backend                              | Extra SDK at build time                      |
-| -------------- | ------------------------------------ | -------------------------------------------- |
-| _(none)_       | Pure CPU (SIMD: AVX2 / NEON)         | -                                            |
-| `cuda`         | NVIDIA GPU via CUDA                  | CUDA toolkit 12+                             |
-| `hipblas`      | AMD GPU via ROCm hipBLAS             | ROCm 7.x, `hipblas-dev`, `rocblas-dev`       |
-| `vulkan`       | Cross-vendor GPU via Vulkan          | Vulkan loader + headers                      |
-| `metal`        | Apple Silicon GPU                    | Xcode CLT                                    |
-| `coreml`       | Apple Neural Engine (encoder)        | Xcode + Core ML tools                        |
-| `intel-sycl`   | Intel Arc / Xe via oneAPI SYCL       | Intel oneAPI Base Toolkit                    |
-| `openblas`     | CPU SGEMM acceleration               | `libopenblas-dev`                            |
-| `openmp`       | OpenMP CPU multi-threading           | `libgomp` / `libomp`                         |
-
-## Backends
-
-The published Hex package ships precompiled artefacts. `rustler_precompiled`
-picks the right one at install time based on the target triple plus the
-optional `WHISPER_CPP_VARIANT` environment variable.
-
-| Target triple                 | Default backend | Variant artefacts             | Selection                       |
-| ----------------------------- | --------------- | ----------------------------- | ------------------------------- |
-| `aarch64-apple-darwin`        | Metal           | -                             | auto                            |
-| `x86_64-unknown-linux-gnu`    | CPU             | `cuda`, `hipblas`             | `WHISPER_CPP_VARIANT=<name>`    |
-| `aarch64-unknown-linux-gnu`   | CPU             | `cuda`                        | `WHISPER_CPP_VARIANT=<name>`    |
-
-For example, to pull the CUDA build on an x86_64 Linux host:
-
-```bash
-WHISPER_CPP_VARIANT=cuda mix deps.compile whisper_cpp
-```
-
-x86_64 macOS and Windows are not shipped as precompiled binaries. Other
-backends (`vulkan`, `coreml`, `intel-sycl`, `openblas`, `openmp`) are not
-in the precompiled matrix; build them from source.
-
-### Build from source with a custom backend
-
-```bash
-WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=cuda       mix compile  # NVIDIA CUDA
-WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=hipblas    mix compile  # AMD ROCm
-WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=vulkan     mix compile  # Cross-vendor Vulkan
-WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=metal      mix compile  # Apple Silicon GPU
-WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=coreml     mix compile  # Apple Neural Engine
-WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=intel-sycl mix compile  # Intel Arc / Xe
-WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=openblas   mix compile  # CPU + OpenBLAS
-WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=openmp     mix compile  # CPU + OpenMP
-WHISPER_CPP_BUILD=1                                 mix compile  # Pure CPU
-```
-
-Pick one accelerator per build; the backend is baked into the artefact.
-The `Taskfile.yml` ships `task build:cpu`, `task build:cuda`, and
-`task build:hipblas` shortcuts.
-
-### Runtime device selection
-
-```elixir
-WhisperCpp.available_devices()
-#=> {:ok, %{backends: [:cpu, :cuda], gpu_supported: true}}
-
-{:ok, model} =
-  WhisperCpp.load_model("models/ggml-large-v3.bin",
-    device: :auto     # :cpu | :cuda | :hipblas | :vulkan | :metal | :coreml | :intel_sycl | :auto
-  )
-```
-
-`:auto` picks the GPU backend if the artefact has one compiled in; otherwise
-CPU. Explicitly requesting a backend that was not compiled returns
-`{:error, %WhisperCpp.Error{reason: :invalid_request}}`.
-
-## Models
-
-Download official whisper.cpp checkpoints from
-<https://huggingface.co/ggerganov/whisper.cpp>:
-
-```bash
-mkdir -p models
-curl -fLo models/ggml-large-v3.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin
-```
-
-Both legacy `.bin` (GGML) and `.gguf` files are supported.
+Installation downloads a precompiled NIF for your target from the project's
+GitHub releases - no Rust toolchain needed. Requires Elixir 1.19+.
 
 ## Usage
 
 ```elixir
 {:ok, model} = WhisperCpp.load_model("models/ggml-large-v3.bin")
 
-# Decode upstream (ffmpeg, bumblebee, ...) into 16 kHz mono f32 PCM.
+# Decode upstream (ffmpeg, bumblebee, ...) into 16 kHz mono f32 PCM:
+#   ffmpeg -i jfk.wav -f f32le -ac 1 -ar 16000 jfk.pcm
 pcm = File.read!("jfk.pcm")
-# produced by: ffmpeg -i jfk.wav -f f32le -ac 1 -ar 16000 jfk.pcm
 
 {:ok, %WhisperCpp.Transcription{text: text, segments: segs}} =
   WhisperCpp.transcribe(model, {:pcm_f32, pcm}, language: "en")
 
 IO.puts(text)
-# => "And so, my fellow Americans, ask not what your country can do for you ..."
-
-for s <- segs do
-  IO.puts("[#{s.start}-#{s.end}] #{s.text}")
-end
+for s <- segs, do: IO.puts("[#{s.start}-#{s.end}] #{s.text}")
 ```
 
-`%WhisperCpp.Segment{}` carries `:start` / `:end` seconds, `:no_speech_prob`,
-`:avg_logprob`, the underlying text token IDs, and (when `:word_timestamps`
-is on) a list of `%WhisperCpp.Word{}` with per-word timing.
+Audio is always `{:pcm_f32, binary}` - little-endian f32 samples, mono, 16 kHz,
+normalised to `[-1.0, 1.0]`. The library does **not** decode WAV/MP3/etc;
+decode upstream. `transcribe_slice/4` runs a `[start_s, end_s)` window of a
+master PCM buffer and shifts the returned times back into the source timeline.
 
-### Audio contract
+See [the docs](https://hexdocs.pm/whisper_cpp) for the full option list
+(`:translate`, `:initial_prompt`, `:word_timestamps`, `:beam_size`,
+`:n_threads`, cancellation, progress messages, ...) and error handling.
 
-`transcribe/3` accepts exactly one input shape:
+## Backends
 
-    {:pcm_f32, binary()}
-
-where `binary` is little-endian IEEE-754 `f32` samples, mono, 16 kHz,
-normalised to `[-1.0, 1.0]`. This library does **not** decode audio file
-formats - decode WAV / MP3 / FLAC / M4A / Opus / etc. upstream and hand the
-PCM in:
+CPU is always available. Pick one accelerator per build; the precompiled Hex
+package ships CPU plus `cuda` / `hipblas` variants for Linux and Metal on Apple
+Silicon, selected via `WHISPER_CPP_VARIANT`:
 
 ```bash
-ffmpeg -i input.mp3  -f f32le -ac 1 -ar 16000 input.pcm
-ffmpeg -i input.m4a  -f f32le -ac 1 -ar 16000 input.pcm
-ffmpeg -i input.opus -f f32le -ac 1 -ar 16000 input.pcm
+WHISPER_CPP_VARIANT=cuda mix deps.compile whisper_cpp
 ```
 
-### Slicing PCM
+To build from source with any whisper-rs backend (`cuda`, `hipblas`, `vulkan`,
+`metal`, `coreml`, `intel-sycl`, `openblas`, `openmp`):
 
-`transcribe_slice/4` runs whisper.cpp on a `[start_s, end_s)` window of an
-already-decoded master PCM buffer and rewrites the returned segment / word
-times back into the absolute timeline of the source audio. Slices shorter
-than 0.3 s return an empty transcription (whisper.cpp pads short inputs and
-hallucinates into the padding).
-
-```elixir
-pcm = File.read!("call.pcm")
-
-{:ok, t} =
-  WhisperCpp.transcribe_slice(model, pcm, {start_s, end_s},
-    language: "en",
-    word_timestamps: true,
-    n_threads: 4
-  )
+```bash
+WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=cuda mix compile
 ```
 
-### Decoding biases
-
-```elixir
-WhisperCpp.transcribe(model, {:pcm_f32, pcm},
-  language: "en",
-  initial_prompt: "Discussion of whisper.cpp, BEAM, and Whisper internals."
-)
-```
-
-## Options
-
-`transcribe/3` and `transcribe_slice/4` accept any subset of:
-
-| Option                          | Type              | Notes                                                  |
-| ------------------------------- | ----------------- | ------------------------------------------------------ |
-| `:language`                     | `String.t \| nil` | ISO code (`"en"`). `nil` auto-detects on multilingual. |
-| `:translate`                    | `boolean`         | Translate to English instead of transcribing.          |
-| `:initial_prompt`               | `String.t \| nil` | Free-text context for decoder biasing.                 |
-| `:word_timestamps`              | `boolean`         | Attach per-word timing.                                |
-| `:beam_size`                    | `pos_integer`     | Beam-search width. Default `5`.                        |
-| `:best_of`                      | `pos_integer`     | Greedy candidates when `beam_size <= 1`.               |
-| `:temperature`                  | `float`           | Sampling temperature (`0.0` = greedy/beam).            |
-| `:n_threads`                    | `pos_integer`     | Intra-op threads. Default `4`.                         |
-| `:n_max_text_ctx`               | `non_neg_integer` | Cap decoder context tokens.                            |
-| `:offset_ms`, `:duration_ms`    | `non_neg_integer` | Clip the audio window.                                 |
-| `:no_speech_thold`              | `float`           | Silence detection threshold.                           |
-| `:logprob_thold`                | `float`           | Reject segments below this `avg_logprob`.              |
-| `:suppress_blank`               | `boolean`         | Suppress the initial blank token.                      |
-| `:suppress_non_speech_tokens`   | `boolean`         | Suppress music/noise tokens.                           |
-| `:single_segment`               | `boolean`         | Force a single segment for the whole audio.            |
-| `:print_progress`               | `boolean`         | whisper.cpp progress to stderr.                        |
-| `:abort_handle`                 | `AbortHandle.t`   | Cooperative cancellation (see below).                  |
-| `:progress_pid`                 | `pid`             | Receives `{:whisper_progress, percent}` messages.      |
-
-Unknown option keys and out-of-range values return
-`{:error, %WhisperCpp.Error{reason: :invalid_request}}` before reaching
-the NIF.
-
-## Cancellation and progress
-
-Mint a `%WhisperCpp.AbortHandle{}` and pass it via `:abort_handle` to ask
-in-flight inference to stop early; the call returns
-`{:ok, partial_transcription}` with whatever segments completed before
-whisper.cpp's next abort poll. Pass `:progress_pid` (commonly `self()`
-inside a `Task`) to receive `{:whisper_progress, percent}` messages
-(0..100) as work advances; duplicate percentages are coalesced.
-
-## Errors
-
-All failures return `{:error, %WhisperCpp.Error{}}`. `reason` is one of
-`:invalid_request`, `:load_error`, `:inference_error`, `:runtime_error`,
-`:nif_panic`, or `:native_error`. The struct also implements `Exception`,
-so `raise/1` works.
+Source builds need a Rust toolchain, `cmake`, a C++17 compiler, and the
+backend's own SDK (CUDA toolkit, ROCm, Vulkan SDK, ...).
 
 ## Testing
 
-Unit tests run with no external dependencies:
-
 ```bash
-mix test
+mix test                  # unit tests, no downloads
+mix test --include integration  # downloads ggml-tiny.en + JFK sample, real inference
 ```
-
-The end-to-end transcription test downloads `ggml-tiny.en.bin` (~75 MB)
-and the JFK sample on first run, caches them under `test/fixtures/`, and
-runs a real whisper.cpp inference:
-
-```bash
-mix test --include integration
-```
-
-Set `WHISPER_CPP_REFRESH=1` to redownload.
 
 ## License
 
-MIT. whisper.cpp itself is MIT-licensed. The bundled `whisper-rs` crate
-vendors whisper.cpp under `sys/whisper.cpp/` and links it statically.
+MIT. whisper.cpp is MIT-licensed; `whisper-rs` is public domain (Unlicense)
+and vendors whisper.cpp, linking it statically.

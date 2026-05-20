@@ -34,7 +34,17 @@ defmodule WhisperCpp.MixProject do
       extras: ["README.md", "CHANGELOG.md", "usage-rules.md"],
       source_url: @source_url,
       source_ref: "v#{@version}",
-      homepage_url: @source_url
+      homepage_url: @source_url,
+      groups_for_modules: [
+        "Result structs": [
+          WhisperCpp.Transcription,
+          WhisperCpp.Segment,
+          WhisperCpp.Word
+        ],
+        Handles: [WhisperCpp.Model, WhisperCpp.AbortHandle],
+        Errors: [WhisperCpp.Error],
+        Internal: [WhisperCpp.Native, WhisperCpp.Pcm]
+      ]
     ]
   end
 
@@ -51,7 +61,7 @@ defmodule WhisperCpp.MixProject do
       links: %{
         "GitHub" => @source_url,
         "whisper.cpp" => "https://github.com/ggerganov/whisper.cpp",
-        "whisper-rs" => "https://github.com/tazz4843/whisper-rs"
+        "whisper-rs" => "https://codeberg.org/tazz4843/whisper-rs"
       },
       files: ~w(lib
            native/whisper_cpp_native/src

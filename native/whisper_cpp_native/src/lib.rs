@@ -321,6 +321,13 @@ fn nif_model_info(env: Env<'_>, model: ResourceArc<WhisperResource>) -> Term<'_>
 }
 
 fn decode_pcm_f32(bytes: &[u8]) -> Result<Vec<f32>, NativeError> {
+    if bytes.is_empty() {
+        return Err(NativeError::new(
+            "invalid_request",
+            "samples binary is empty",
+        ));
+    }
+
     if !bytes.len().is_multiple_of(4) {
         return Err(NativeError::new(
             "invalid_request",
@@ -431,6 +438,12 @@ mod tests {
         }
         let decoded = decode_pcm_f32(&bytes).unwrap();
         assert_eq!(decoded, vec![0.0, 1.0, -1.0, 0.5, -0.25]);
+    }
+
+    #[test]
+    fn decode_pcm_f32_rejects_empty_input() {
+        let err = decode_pcm_f32(&[]).unwrap_err();
+        assert_eq!(err.r#type, "invalid_request");
     }
 
     #[test]

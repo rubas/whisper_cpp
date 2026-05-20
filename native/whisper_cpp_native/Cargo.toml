@@ -18,20 +18,9 @@ parking_lot = "0.12.5"
 anyhow = "1.0.102"
 
 [features]
-# Pick exactly one acceleration backend per build. CPU is always
-# available; the GPU features are mutually exclusive at runtime.
-#
-#   WHISPER_CPP_FEATURES=cuda       NVIDIA CUDA (Linux/Windows x86_64, aarch64)
-#   WHISPER_CPP_FEATURES=hipblas    AMD ROCm via hipBLAS (Linux x86_64)
-#   WHISPER_CPP_FEATURES=vulkan     Cross-vendor Vulkan
-#   WHISPER_CPP_FEATURES=metal      Apple Silicon GPU
-#   WHISPER_CPP_FEATURES=coreml     Apple Neural Engine (encoder)
-#   WHISPER_CPP_FEATURES=intel-sycl Intel Arc / Xe via oneAPI SYCL
-#   WHISPER_CPP_FEATURES=openblas   CPU SGEMM acceleration
-#   WHISPER_CPP_FEATURES=openmp     Multi-thread CPU via OpenMP
-#
-# Bare `mix compile` builds the pure-CPU artefact (whisper.cpp's built-in
-# fp16 SIMD on x86_64 / NEON on aarch64).
+# Pick exactly one acceleration backend per build via WHISPER_CPP_FEATURES.
+# CPU is always available (bare `mix compile`); GPU backends are mutually
+# exclusive at runtime.
 default = []
 cuda = ["whisper-rs/cuda"]
 hipblas = ["whisper-rs/hipblas"]

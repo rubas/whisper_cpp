@@ -106,6 +106,21 @@ defmodule WhisperCpp.IntegrationTest do
     assert WhisperCpp.AbortHandle.aborted?(handle)
   end
 
+  test "sub-window audio returns a clean result instead of aborting the node", %{model_path: model} do
+    {:ok, model_ref} = WhisperCpp.load_model(model)
+
+    # 0.1 s of silence: shorter than whisper.cpp's 30 s window. whisper.cpp
+    # pads short inputs, so this must come back as {:ok, _}, never a
+    # SIGABRT inside ggml that would take the BEAM node down.
+    short_pcm = <<0::size(1_600 * 4)-unit(8)>>
+
+    assert {:ok, %WhisperCpp.Transcription{}} =
+             WhisperCpp.transcribe(model_ref, {:pcm_f32, short_pcm}, language: "en", n_threads: 4)
+
+    assert {:error, %WhisperCpp.Error{reason: :invalid_request}} =
+             WhisperCpp.transcribe(model_ref, {:pcm_f32, ""}, language: "en")
+  end
+
   defp collect_progress(acc) do
     receive do
       {:whisper_progress, pct} -> collect_progress([pct | acc])

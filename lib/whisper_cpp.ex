@@ -2,11 +2,12 @@ defmodule WhisperCpp do
   @moduledoc """
   Native Elixir bindings for [whisper.cpp](https://github.com/ggerganov/whisper.cpp).
 
-  Calls into whisper.cpp's C API through the `whisper-rs` Rust crate via
-  a Rustler NIF. No `whisper-cli` subprocess, no Python, no temporary
-  files. Structured per-segment results, `:initial_prompt` biasing,
-  word-level timestamps, and CUDA / ROCm (hipBLAS) / Metal / CPU
-  backends.
+  A thin wrapper around the
+  [`whisper-rs`](https://codeberg.org/tazz4843/whisper-rs) crate, calling
+  whisper.cpp's C API through a Rustler NIF. No `whisper-cli` subprocess,
+  no Python, no temporary files. Structured per-segment results,
+  `:initial_prompt` biasing, word-level timestamps, and CUDA / ROCm
+  (hipBLAS) / Metal / CPU backends.
 
   ## Quickstart
 

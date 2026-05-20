@@ -236,7 +236,6 @@ fn extract_segment(
         .map(std::borrow::Cow::into_owned)
         .inference_error_ctx("failed to read segment text")?;
 
-    // whisper.cpp reports times in 10-ms units (`t0`, `t1`).
     let start = cs_to_s(seg.start_timestamp());
     let end = cs_to_s(seg.end_timestamp());
     let no_speech_prob = seg.no_speech_probability();
@@ -260,11 +259,7 @@ fn extract_segment(
         let data = tok.token_data();
         let id = data.id;
 
-        // Keep only text tokens. Whisper packs the vocab as
-        // [text | <|endoftext|> | language | task | timestamp]; the eot
-        // id is the first non-text token, so `id < token_eot` is the
-        // boundary. Read per-model at load time to track checkpoint
-        // variants instead of hardcoding 50_257.
+        // Keep only text tokens: `id < token_eot` is the text/non-text boundary.
         if let Ok(u) = u32::try_from(id)
             && u < token_eot
         {
