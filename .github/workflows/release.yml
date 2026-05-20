@@ -10,8 +10,7 @@ on:
         description: "Tag to build and publish (e.g., v0.1.0)"
         required: true
 
-permissions:
-  contents: write
+permissions: {}
 
 concurrency:
   group: release-${{ github.event_name }}-${{ github.ref_name || inputs.tag }}
@@ -23,7 +22,13 @@ env:
 
 jobs:
   detect:
+    name: Resolve release target
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read # read mix.exs / git history to resolve the release target
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-detect
+      cancel-in-progress: false
     outputs:
       should_release: ${{ steps.resolve.outputs.should_release }}
       tag: ${{ steps.resolve.outputs.tag }}
@@ -35,6 +40,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Resolve release target
         id: resolve
@@ -91,6 +97,11 @@ jobs:
     if: needs.detect.outputs.should_release == 'true'
     name: ${{ matrix.id }}
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read # checkout the source ref to build NIF artifacts
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-build-${{ matrix.id }}
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:
@@ -162,8 +173,10 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ needs.detect.outputs.sha }}
+          persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+      # pinned toolchain installer keeps the Rust version and cross targets reproducible
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable # zizmor: ignore[superfluous-actions]
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: ${{ matrix.target }}
@@ -287,13 +300,18 @@ jobs:
           if-no-files-found: error
 
   tag:
+    name: Create release tag
     runs-on: ubuntu-24.04
     needs: detect
     if: github.event_name == 'push' && needs.detect.outputs.should_release == 'true' && needs.detect.outputs.tag_exists != 'true'
     permissions:
-      contents: write
+      contents: write # create and push the release tag
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-tag
+      cancel-in-progress: false
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # this job pushes the release tag, so checkout credentials must persist
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 # zizmor: ignore[artipacked]
         with:
           ref: ${{ needs.detect.outputs.sha }}
           fetch-depth: 0
@@ -315,6 +333,11 @@ jobs:
       - tag
     if: always() && needs.detect.outputs.should_release == 'true' && needs.build.result == 'success' && (needs.tag.result == 'success' || needs.tag.result == 'skipped')
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write # publish the GitHub release and upload assets
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-release
+      cancel-in-progress: false
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -329,8 +352,9 @@ jobs:
         working-directory: artifacts
         run: sha256sum *.tar.gz | tee SHA256SUMS
 
+      # one pinned step handles tag targeting, asset upload, and release notes
       - name: Create release
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1 # zizmor: ignore[superfluous-actions]
         with:
           tag_name: ${{ needs.detect.outputs.tag }}
           target_commitish: ${{ needs.detect.outputs.sha }}
