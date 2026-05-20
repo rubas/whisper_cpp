@@ -189,11 +189,17 @@ pub(crate) fn transcribe_one(
     };
 
     let mut params = build_params(request);
+    let abort_flag_check = abort_flag.clone();
     install_callbacks(&mut params, abort_flag, progress_pid);
 
-    state
-        .full(params, samples)
-        .map_err(|e| inference_error(format!("whisper.cpp full() failed: {e}")))?;
+    if let Err(e) = state.full(params, samples) {
+        let aborted = abort_flag_check.is_some_and(|f| f.load(Ordering::SeqCst));
+        if !aborted {
+            return Err(inference_error(format!("whisper.cpp full() failed: {e}")));
+        }
+        // Abort was requested by the caller: fall through and return the
+        // segments produced before cancellation as a partial result.
+    }
 
     let n_segments = usize::try_from(state.full_n_segments()).unwrap_or(0);
     let mut segments = Vec::with_capacity(n_segments);
