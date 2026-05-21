@@ -10,8 +10,7 @@ on:
   schedule:
     - cron: "23 4 * * 1"
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: integration-${{ github.ref }}
@@ -28,9 +27,16 @@ jobs:
     name: End-to-end transcription
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    permissions:
+      contents: read # checkout the repository
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-integration
+      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - name: Shared build env
         uses: ./.github/actions/setup

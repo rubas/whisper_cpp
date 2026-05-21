@@ -150,6 +150,11 @@ tasks:
     cmds:
       - mix compile
 
+  test:zizmor:
+    desc: Lint GitHub Actions workflows for security issues
+    cmds:
+      - zizmor --offline --persona=pedantic .github/workflows
+
   check:
     desc: Full local quality gate (Elixir + Rust)
     cmds:
@@ -158,3 +163,4 @@ tasks:
       - task: lint
       - task: test
       - task: test:rust
+      - task: test:zizmor
