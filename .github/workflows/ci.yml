@@ -13,7 +13,7 @@ concurrency:
 
 env:
   MIX_ENV: test
-  ELIXIR_VERSION: "1.20.0-rc.4"
+  ELIXIR_VERSION: "1.20.0-rc.6"
   OTP_VERSION: "29.0"
   RUST_TOOLCHAIN: "1.91.0"
 
