@@ -4,6 +4,27 @@ All notable changes to `whisper_cpp` will be documented in this file. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- `:abort_handle` cancellation works now. The abort callback is passed to
+  whisper-rs as a boxed trait object so the trampoline polls the real flag;
+  the bare closure was reinterpreted memory (out-of-bounds reads) and the
+  flag was never consulted, so cancellation silently did nothing.
+- `:progress_pid` no longer leaks one OS thread per call. The progress
+  sender thread is shut down explicitly after inference; the previous
+  design waited for a channel close that whisper-rs's leaked callback
+  closure could never trigger.
+- `:word_timestamps` no longer corrupts multibyte UTF-8. Token bytes are
+  accumulated per word and converted once, so characters split across BPE
+  tokens (umlauts and most non-Latin scripts) survive instead of turning
+  into replacement characters.
+- Dropping the last reference to a loaded model frees the whisper context
+  on a detached thread instead of the garbage-collecting BEAM scheduler,
+  which a multi-gigabyte free would stall.
+- `{:pcm_f32, _}` buffers containing NaN or infinity samples are rejected
+  with `:invalid_request` instead of being fed to inference.
+
 ## [0.2.0] - 2026-05-20
 
 ### Added
