@@ -124,6 +124,59 @@ defmodule WhisperCppTest do
     end
   end
 
+  describe "transcribe/3 decoding option validation" do
+    setup do
+      {:ok,
+       model: %WhisperCpp.Model{
+         ref: make_ref(),
+         path: "fake",
+         sampling_rate: 16_000,
+         multilingual: false,
+         n_vocab: 51_864,
+         device: :cpu
+       },
+       pcm: {:pcm_f32, <<0.0::little-float-32>>}}
+    end
+
+    test "rejects temperature above whisper's ladder ceiling", %{model: model, pcm: pcm} do
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe(model, pcm, temperature: 1.5)
+    end
+
+    test "rejects thread counts past the GGML abort threshold", %{model: model, pcm: pcm} do
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe(model, pcm, n_threads: 1_000)
+    end
+
+    test "rejects decoder counts past WHISPER_MAX_DECODERS", %{model: model, pcm: pcm} do
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe(model, pcm, beam_size: 9)
+
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe(model, pcm, best_of: 9)
+    end
+
+    test "rejects integers past u32 and floats past f32", %{model: model, pcm: pcm} do
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe(model, pcm, offset_ms: 5_000_000_000)
+
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe(model, pcm, logprob_thold: -1.0e300)
+    end
+
+    test "rejects invalid UTF-8 in string options", %{model: model, pcm: pcm} do
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe(model, pcm, language: <<0xFF, 0xFE>>)
+    end
+
+    test "rejects non-keyword option lists", %{model: model, pcm: pcm} do
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.transcribe(model, pcm, [:bogus])
+
+      assert msg =~ "keyword list"
+    end
+  end
+
   describe "transcribe/3 VAD option validation" do
     setup do
       {:ok,
@@ -165,6 +218,74 @@ defmodule WhisperCppTest do
     test "rejects duration_ms of zero", %{model: model, pcm: pcm} do
       assert {:error, %Error{reason: :invalid_request}} =
                WhisperCpp.transcribe(model, pcm, duration_ms: 0)
+    end
+  end
+
+  describe "transcribe_slice/4 short windows" do
+    setup do
+      {:ok,
+       model: %WhisperCpp.Model{
+         ref: make_ref(),
+         path: "fake",
+         sampling_rate: 16_000,
+         multilingual: false,
+         n_vocab: 51_864,
+         device: :cpu
+       },
+       buffer: <<0::size(16_000 * 5 * 4)-unit(8)>>}
+    end
+
+    test "validates options before short-circuiting", %{model: model, buffer: buffer} do
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.transcribe_slice(model, buffer, {0.0, 0.1}, bogus: 1)
+
+      assert msg =~ "unknown option"
+    end
+
+    test "rejects short windows past the end of the buffer", %{model: model, buffer: buffer} do
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.transcribe_slice(model, buffer, {100.0, 100.2})
+
+      assert msg =~ "past the end"
+    end
+
+    test "rejects misaligned buffers on the short path", %{model: model} do
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe_slice(model, <<1, 2, 3>>, {0.0, 0.1})
+    end
+
+    test "keeps the pinned language on the empty result", %{buffer: buffer} do
+      multilingual = %WhisperCpp.Model{
+        ref: make_ref(),
+        path: "fake",
+        sampling_rate: 16_000,
+        multilingual: true,
+        n_vocab: 51_865,
+        device: :cpu
+      }
+
+      assert {:ok, %WhisperCpp.Transcription{text: "", segments: [], language: "de"}} =
+               WhisperCpp.transcribe_slice(multilingual, buffer, {0.0, 0.1}, language: "de")
+    end
+
+    test "applies model semantics on the short path", %{model: model, buffer: buffer} do
+      # `model` is English-only: requests the native path rejects must
+      # not succeed just because the window is short.
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.transcribe_slice(model, buffer, {0.0, 0.1}, translate: true)
+
+      assert msg =~ "English-only"
+
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.transcribe_slice(model, buffer, {0.0, 0.1}, language: "klingon")
+
+      assert msg =~ "unknown language"
+
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe_slice(model, buffer, {0.0, 0.1}, language: "de")
+
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe_slice(model, buffer, {0.0, 0.1}, vad_model_path: "/nonexistent/vad.bin")
     end
   end
 
@@ -222,13 +343,13 @@ defmodule WhisperCppTest do
   end
 
   describe "build_transcription/2" do
-    test "concatenates segments and trims" do
+    test "concatenates space-prefixed segments without doubling spaces" do
       payload = %{
         language: "en",
         duration_s: 1.5,
         segments: [
           %{
-            text: "Hello",
+            text: " Hello",
             start: 0.0,
             end: 0.5,
             no_speech_prob: 0.1,
@@ -237,7 +358,7 @@ defmodule WhisperCppTest do
             words: nil
           },
           %{
-            text: "world",
+            text: " world",
             start: 0.6,
             end: 1.2,
             no_speech_prob: 0.1,

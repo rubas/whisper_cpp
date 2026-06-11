@@ -184,19 +184,22 @@ defmodule WhisperCpp do
   - `:initial_prompt` - free-text context prepended via `<|startofprev|>`
     to bias decoding (max ~224 tokens).
   - `:word_timestamps` - attach per-word timing. Default `false`.
-  - `:beam_size` - beam-search width; `2` or higher enables beam search.
-    Default: greedy decoding (no beam search).
-  - `:best_of` - greedy decoding candidates kept when beam search is off.
-    Default `1`.
-  - `:temperature` - sampling temperature (`0.0` = greedy/beam).
-  - `:n_threads` - intra-op threads. Default `4`.
+  - `:beam_size` - beam-search width; `2` or higher enables beam search,
+    up to whisper.cpp's limit of `8`. Default: greedy decoding.
+  - `:best_of` - sampling candidates on temperature-fallback passes (used
+    in greedy and beam mode), `1..8`. Default `5`, matching whisper.cpp.
+  - `:temperature` - start of whisper.cpp's retry ladder, `0.0..1.0`
+    (`0.0` = deterministic first pass).
+  - `:n_threads` - intra-op threads, up to `512`. Default: whisper.cpp
+    picks `min(4, cores)`.
   - `:n_max_text_ctx` - cap decoder context tokens.
   - `:offset_ms`, `:duration_ms` - clip the audio window; `:duration_ms`
     must be at least 1.
   - `:no_speech_thold` - silence detection threshold. Default `0.6`.
   - `:logprob_thold` - reject segments with `avg_logprob` below this.
   - `:suppress_blank`, `:suppress_non_speech_tokens` - decoder suppressions.
-  - `:single_segment` - force a single segment for the whole audio.
+  - `:single_segment` - force a single segment per 30 s whisper window
+    (audio longer than one window still yields several segments).
   - `:print_progress` - whisper.cpp progress to stderr.
   - `:vad_model_path` - path to a silero VAD model in GGML format (download
     `ggml-silero-v5.1.2.bin` from
@@ -215,10 +218,13 @@ defmodule WhisperCpp do
     speech segment to avoid clipping. Default `30`.
   - `:abort_handle` - `%WhisperCpp.AbortHandle{}` whose `abort/1` cancels
     in-flight inference. The call returns `{:ok, partial_transcription}`
-    with whatever segments completed before the abort took effect.
+    with whatever segments completed before the abort took effect. The
+    VAD pass itself is not interruptible; the flag is honoured right
+    after it, before the encoder starts.
   - `:progress_pid` - pid that receives `{:whisper_progress, percent}`
     messages (0..100) as work advances; duplicate percentages are
-    coalesced.
+    coalesced. Messages already in flight can arrive after the call
+    returns.
   """
   @spec transcribe(Model.t(), audio(), [transcribe_opt()]) ::
           {:ok, Transcription.t()} | {:error, Error.t()}
@@ -261,7 +267,7 @@ defmodule WhisperCpp do
          {:ok, transcription} <- do_transcribe(model, slice, opts, start_s * 1.0) do
       {:ok, transcription}
     else
-      {:short, _} -> {:ok, empty_transcription(start_s, end_s)}
+      {:short, _} -> short_slice_result(model, samples, start_s, end_s, opts)
       err -> err
     end
   end
@@ -281,12 +287,110 @@ defmodule WhisperCpp do
          end_s: end_s
        })}
 
-  defp validate_slice_range(start_s, end_s) when end_s - start_s < 0.3, do: {:short, end_s - start_s}
+  # Strictly-below comparison with an epsilon: a window of exactly the
+  # documented 0.3 s minimum must transcribe even when float subtraction
+  # lands a hair under (2.3 - 2.0 == 0.2999...).
+  defp validate_slice_range(start_s, end_s) when end_s - start_s < 0.3 - 1.0e-9,
+    do: {:short, end_s - start_s}
 
   defp validate_slice_range(_start_s, _end_s), do: :ok
 
-  defp empty_transcription(start_s, end_s) do
-    %Transcription{text: "", segments: [], language: "", duration_s: (end_s - start_s) * 1.0}
+  # Sub-0.3 s windows return an empty transcription, but only after the
+  # same buffer checks a full slice would run - an out-of-bounds or
+  # malformed request is a caller bug regardless of window size.
+  defp short_slice_result(model, samples, start_s, end_s, opts) do
+    cond do
+      rem(byte_size(samples), 4) != 0 ->
+        {:error,
+         Error.new(:invalid_request, "samples binary length must be a multiple of 4 (f32)", %{
+           byte_size: byte_size(samples)
+         })}
+
+      end_s > Pcm.duration_s(samples, sample_rate()) ->
+        {:error,
+         Error.new(:invalid_request, "requested window extends past the end of the buffer", %{
+           start_s: start_s,
+           end_s: end_s,
+           buffer_duration_s: Pcm.duration_s(samples, sample_rate())
+         })}
+
+      true ->
+        with :ok <- validate_request_semantics(model, opts) do
+          {:ok, empty_transcription(start_s, end_s, Keyword.get(opts, :language))}
+        end
+    end
+  end
+
+  # Mirrors the native request checks (`resolve_language` and friends in
+  # transcribe.rs, which stay authoritative for full runs) so semantics
+  # do not depend on slice length: a request the native path rejects
+  # must not succeed just because the window is under 0.3 s.
+  defp validate_request_semantics(%Model{multilingual: multilingual}, opts) do
+    with :ok <- check_language(Keyword.get(opts, :language), multilingual),
+         :ok <- check_translate(Keyword.get(opts, :translate, false), multilingual),
+         :ok <- check_prompt(Keyword.get(opts, :initial_prompt)) do
+      check_vad_path(Keyword.get(opts, :vad_model_path))
+    end
+  end
+
+  defp check_language(language, _multilingual) when language in [nil, "auto"], do: :ok
+
+  defp check_language(language, multilingual) do
+    cond do
+      not Native.known_language?(language) ->
+        {:error,
+         Error.new(
+           :invalid_request,
+           "unknown language #{inspect(language)}; pass an ISO 639-1 code whisper.cpp " <>
+             "supports (e.g. \"de\"), a full language name (\"german\"), or \"auto\""
+         )}
+
+      not multilingual and language not in ["en", "english"] ->
+        {:error,
+         Error.new(
+           :invalid_request,
+           "model is English-only; language #{inspect(language)} is unavailable " <>
+             "(use \"en\", \"auto\", or omit the option)"
+         )}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp check_translate(true, false = _multilingual) do
+    {:error, Error.new(:invalid_request, "model is English-only; translate has nothing to translate from")}
+  end
+
+  defp check_translate(_translate, _multilingual), do: :ok
+
+  defp check_prompt(prompt) when is_binary(prompt) do
+    if String.contains?(prompt, <<0>>) do
+      {:error, Error.new(:invalid_request, "initial_prompt must not contain NUL bytes")}
+    else
+      :ok
+    end
+  end
+
+  defp check_prompt(_prompt), do: :ok
+
+  defp check_vad_path(path) when is_binary(path) do
+    if File.regular?(path) do
+      :ok
+    else
+      {:error, Error.new(:invalid_request, "vad_model_path is not a regular file: #{inspect(path)}")}
+    end
+  end
+
+  defp check_vad_path(_path), do: :ok
+
+  defp empty_transcription(start_s, end_s, language) do
+    %Transcription{
+      text: "",
+      segments: [],
+      language: language || "",
+      duration_s: (end_s - start_s) * 1.0
+    }
   end
 
   defp do_transcribe(%Model{ref: ref}, samples, opts, offset_s) do
@@ -336,9 +440,12 @@ defmodule WhisperCpp do
 
   defp build_load_opts(opts) do
     device =
-      case Keyword.get(opts, :device) do
-        nil -> if Keyword.get(opts, :use_gpu, true), do: "auto", else: "cpu"
-        atom when is_atom(atom) -> Atom.to_string(atom)
+      case {Keyword.get(opts, :device), Keyword.get(opts, :use_gpu, true)} do
+        {nil, true} -> "auto"
+        {nil, false} -> "cpu"
+        # use_gpu: false wins, as the docs promise.
+        {device, false} when device not in [:cpu, nil] -> "cpu"
+        {device, _} -> Atom.to_string(device)
       end
 
     %{device: device}
@@ -361,9 +468,12 @@ defmodule WhisperCpp do
   def build_transcription(%{language: language, duration_s: duration_s, segments: raw_segments}, offset_s) do
     segments = Enum.map(raw_segments, &build_segment(&1, offset_s))
 
+    # whisper.cpp segment text starts with its own leading space, so a
+    # plain concatenation reproduces canonical whisper output (and adds
+    # no spurious spaces to space-free scripts).
     text =
       segments
-      |> Enum.map_join(" ", & &1.text)
+      |> Enum.map_join("", & &1.text)
       |> String.trim()
 
     %Transcription{
@@ -445,6 +555,9 @@ defmodule WhisperCpp do
     %{device: &(&1 in @devices), use_gpu: &is_boolean/1}
   end
 
+  # GGML aborts the process past GGML_MAX_N_THREADS.
+  @ggml_max_threads 512
+
   defp transcribe_validators do
     Map.merge(decoding_validators(), vad_validators())
   end
@@ -455,10 +568,10 @@ defmodule WhisperCpp do
       translate: &is_boolean/1,
       initial_prompt: &valid_optional_string?/1,
       word_timestamps: &is_boolean/1,
-      beam_size: &positive_integer?/1,
-      best_of: &positive_integer?/1,
-      temperature: &non_neg_number?/1,
-      n_threads: &positive_integer?/1,
+      beam_size: &decoder_count?/1,
+      best_of: &decoder_count?/1,
+      temperature: &temperature?/1,
+      n_threads: &(positive_integer?(&1) and &1 <= @ggml_max_threads),
       n_max_text_ctx: &non_neg_integer?/1,
       offset_ms: &non_neg_integer?/1,
       duration_ms: &positive_integer?/1,
@@ -520,7 +633,7 @@ defmodule WhisperCpp do
     Enum.reduce_while(opts, :ok, fn pair, :ok -> check_option(pair, validators) end)
   end
 
-  defp check_option({key, value}, validators) do
+  defp check_option({key, value}, validators) when is_atom(key) do
     case Map.fetch(validators, key) do
       :error ->
         {:halt, {:error, Error.new(:invalid_request, "unknown option #{inspect(key)}")}}
@@ -534,11 +647,26 @@ defmodule WhisperCpp do
     end
   end
 
+  defp check_option(other, _validators) do
+    {:halt, {:error, Error.new(:invalid_request, "options must be a keyword list; got element #{inspect(other)}")}}
+  end
+
   defp valid_optional_string?(nil), do: true
-  defp valid_optional_string?(value) when is_binary(value), do: String.trim(value) != ""
+
+  defp valid_optional_string?(value) when is_binary(value),
+    do: String.valid?(value) and String.trim(value) != ""
+
   defp valid_optional_string?(_), do: false
 
   defp probability?(v), do: number?(v) and v >= 0 and v <= 1
+
+  # whisper.cpp builds its retry ladder from the start temperature in
+  # +0.2 steps up to 1.0; a start above 1.0 yields an empty ladder and
+  # undefined decoder state.
+  defp temperature?(v), do: number?(v) and v >= 0 and v <= 1
+
+  # whisper.cpp allocates WHISPER_MAX_DECODERS (8) decoder slots.
+  defp decoder_count?(v), do: is_integer(v) and v in 1..8
 
   # The NIF decodes integer options as u32; larger values would raise a
   # decode ArgumentError instead of returning :invalid_request.
@@ -546,6 +674,9 @@ defmodule WhisperCpp do
 
   defp positive_integer?(v), do: is_integer(v) and v > 0 and v <= @u32_max
   defp non_neg_integer?(v), do: is_integer(v) and v >= 0 and v <= @u32_max
-  defp number?(v), do: is_integer(v) or is_float(v)
-  defp non_neg_number?(v), do: number?(v) and v >= 0
+  # Floats cross the NIF as f32; values outside its range fail decode
+  # with a raise instead of an error tuple.
+  @f32_max 3.402_823_5e38
+
+  defp number?(v), do: (is_integer(v) or is_float(v)) and abs(v) <= @f32_max
 end

@@ -55,6 +55,9 @@ defmodule WhisperCpp.Pcm do
 
   @doc """
   Returns the audio duration of an f32-PCM buffer in seconds.
+
+  Trailing bytes of a misaligned binary (length not a multiple of 4)
+  are ignored; `slice/4` rejects such binaries outright.
   """
   @spec duration_s(binary(), pos_integer()) :: float()
   def duration_s(samples, sample_rate)
@@ -64,8 +67,10 @@ defmodule WhisperCpp.Pcm do
 
   defp do_slice(samples, sample_rate, start_s, duration_s) do
     total_samples = div(byte_size(samples), @bytes_per_sample)
-    start_sample = trunc(start_s * sample_rate)
-    requested_samples = trunc(duration_s * sample_rate)
+    # Round, do not truncate: millisecond-precise times otherwise lose
+    # their last sample to float representation error.
+    start_sample = round(start_s * sample_rate)
+    requested_samples = round(duration_s * sample_rate)
     end_sample = start_sample + requested_samples
     buffer_duration_s = total_samples / sample_rate
 

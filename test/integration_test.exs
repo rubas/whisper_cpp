@@ -86,6 +86,8 @@ defmodule WhisperCpp.IntegrationTest do
     received = collect_progress([])
     refute received == []
     assert Enum.all?(received, &(&1 in 0..100))
+    # consecutive duplicates are coalesced at the source
+    assert received == Enum.dedup(received)
   end
 
   test "abort_handle is observed by inference", %{model_path: model, pcm: pcm} do
@@ -277,6 +279,31 @@ defmodule WhisperCpp.IntegrationTest do
       assert List.last(segs).end <= 8.5
     end
 
+    test "multi-span audio is stitched and remapped to the original timeline", %{
+      model_path: model,
+      pcm: pcm,
+      vad_path: vad
+    } do
+      {:ok, model_ref} = WhisperCpp.load_model(model)
+
+      # Two speech spans separated by 2 s of silence: VAD must produce
+      # at least two spans, and the second span's words must land after
+      # the silence gap on the original timeline (jfk is ~11 s).
+      silence = <<0::size(16_000 * 2 * 4)-unit(8)>>
+      doubled = pcm <> silence <> pcm
+
+      assert {:ok, %WhisperCpp.Transcription{segments: [_ | _] = segs, text: text}} =
+               WhisperCpp.transcribe(model_ref, {:pcm_f32, doubled},
+                 language: "en",
+                 n_threads: 4,
+                 vad_model_path: vad
+               )
+
+      assert text =~ "country"
+      assert List.last(segs).end > 13.0
+      assert List.last(segs).end < 25.0
+    end
+
     test "a missing VAD model file is rejected", %{model_path: model, pcm: pcm} do
       {:ok, model_ref} = WhisperCpp.load_model(model)
 
@@ -285,6 +312,28 @@ defmodule WhisperCpp.IntegrationTest do
 
       assert error.message =~ "vad_model_path"
     end
+  end
+
+  test "beam search decodes correctly", %{model_path: model, pcm: pcm} do
+    {:ok, model_ref} = WhisperCpp.load_model(model)
+
+    assert {:ok, %WhisperCpp.Transcription{text: text}} =
+             WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm},
+               language: "en",
+               n_threads: 4,
+               beam_size: 2
+             )
+
+    assert text =~ "country"
+  end
+
+  test "translate is rejected on English-only models", %{model_path: model, pcm: pcm} do
+    {:ok, model_ref} = WhisperCpp.load_model(model)
+
+    assert {:error, %WhisperCpp.Error{reason: :invalid_request} = error} =
+             WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm}, translate: true)
+
+    assert error.message =~ "English-only"
   end
 
   test "non-finite PCM samples are rejected", %{model_path: model} do

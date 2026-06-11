@@ -14,6 +14,13 @@ defmodule WhisperCpp.Native do
 
   @version Mix.Project.config()[:version]
 
+  @known_variants ~w(cuda hipblas)
+  @variant System.get_env("WHISPER_CPP_VARIANT")
+  if @variant not in [nil | @known_variants] do
+    raise CompileError,
+      description: "unknown WHISPER_CPP_VARIANT #{inspect(@variant)}; expected one of #{inspect(@known_variants)}"
+  end
+
   use RustlerPrecompiled,
     otp_app: :whisper_cpp,
     crate: "whisper_cpp_native",
@@ -38,6 +45,10 @@ defmodule WhisperCpp.Native do
       ]
     },
     features: @cargo_features
+
+  @doc "Reports whether whisper.cpp's language table knows the given code or name."
+  @spec known_language?(String.t()) :: boolean()
+  def known_language?(lang), do: nif_known_language(lang)
 
   @doc "Reports the active runtime backends compiled into this NIF artefact."
   @spec available_devices() :: {:ok, map()} | {:error, map()}
@@ -76,6 +87,8 @@ defmodule WhisperCpp.Native do
   @doc "Returns `true` once an abort handle has been signalled."
   @spec abort_handle_aborted?(reference()) :: boolean()
   def abort_handle_aborted?(handle), do: nif_abort_handle_aborted(handle)
+
+  defp nif_known_language(_lang), do: :erlang.nif_error(:nif_not_loaded)
 
   defp nif_available_devices, do: :erlang.nif_error(:nif_not_loaded)
   defp nif_load_model(_path, _opts), do: :erlang.nif_error(:nif_not_loaded)

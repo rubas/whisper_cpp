@@ -107,17 +107,21 @@ fn resolve_language(requested: Option<&str>, multilingual: bool) -> anyhow::Resu
 /// when `beam_size > 1`, otherwise greedy. `language: None` selects
 /// whisper.cpp's auto-detection.
 fn build_params<'a>(req: &'a TranscribeRequest, language: Option<&'a str>) -> FullParams<'a, 'a> {
+    // whisper.cpp's default: 5 sampling candidates on the
+    // temperature-fallback passes, in both greedy and beam mode.
+    let best_of = u32_to_i32(req.best_of.unwrap_or(5));
     let strategy = match req.beam_size {
         Some(n) if n > 1 => SamplingStrategy::BeamSearch {
             beam_size: u32_to_i32(n),
             patience: -1.0,
         },
-        _ => SamplingStrategy::Greedy {
-            best_of: u32_to_i32(req.best_of.unwrap_or(1)),
-        },
+        _ => SamplingStrategy::Greedy { best_of },
     };
 
     let mut params = FullParams::new(strategy);
+    // The constructor only writes the chosen strategy's struct, but
+    // whisper.cpp reads greedy.best_of for fallback passes regardless.
+    params.set_greedy_best_of(best_of);
 
     if let Some(t) = req.n_threads {
         params.set_n_threads(u32_to_i32(t));
@@ -206,6 +210,9 @@ fn install_callbacks(
     });
     let mut last: i32 = -1;
     params.set_progress_callback_safe(move |pct: i32| {
+        // whisper.cpp can report past 100 on its last chunk; the
+        // documented contract is 0..=100.
+        let pct = pct.clamp(0, 100);
         if pct == last {
             return;
         }
@@ -228,6 +235,12 @@ pub(crate) fn transcribe_one(
 ) -> anyhow::Result<TranscriptionResult> {
     let token_eot = model.token_eot;
     let language = resolve_language(request.language.as_deref(), model.multilingual)?;
+
+    if request.translate && !model.multilingual {
+        return Err(invalid_request(
+            "model is English-only; translate has nothing to translate from",
+        ));
+    }
 
     // whisper-rs's `set_initial_prompt` panics on embedded NUL bytes
     // (CString conversion); reject them as a caller error instead.
@@ -332,12 +345,17 @@ pub(crate) fn transcribe_one(
         }
     }
 
-    let language = {
+    // With no decoded segments there was no detection: echo the request
+    // (or "" when auto-detect found nothing to detect) instead of the
+    // state's lang_id default, which reads as a fabricated "en".
+    let language = if segments.is_empty() {
+        language.unwrap_or_default()
+    } else {
         let id = state.full_lang_id_from_state();
         whisper_rs::get_lang_str(id)
             .map(str::to_owned)
             .or(language)
-            .unwrap_or_else(|| "en".to_owned())
+            .unwrap_or_default()
     };
 
     Ok(TranscriptionResult {

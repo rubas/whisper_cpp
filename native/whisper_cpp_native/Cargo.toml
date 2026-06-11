@@ -61,5 +61,5 @@ codegen-units = 1
 # from this crate, which never clones FullParams): cloning a FullParams
 # shares the installed closures and grammar pointers across clones.
 [patch.crates-io]
-whisper-rs = { git = "https://github.com/rubas/whisper_cpp.git", rev = "810149062ac4a9207b3ee00eafa69344ab61980f" }
-whisper-rs-sys = { git = "https://github.com/rubas/whisper_cpp.git", rev = "810149062ac4a9207b3ee00eafa69344ab61980f" }
+whisper-rs = { git = "https://github.com/rubas/whisper_cpp.git", rev = "d5674fcf42bf09f38d880ccaf4084e5bcf769e47" }
+whisper-rs-sys = { git = "https://github.com/rubas/whisper_cpp.git", rev = "d5674fcf42bf09f38d880ccaf4084e5bcf769e47" }
