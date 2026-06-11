@@ -10,7 +10,7 @@ no Python, no temporary files.
 
 ```elixir
 def deps do
-  [{:whisper_cpp, "~> 0.1.0"}]
+  [{:whisper_cpp, "~> 0.3.0"}]
 end
 ```
 
