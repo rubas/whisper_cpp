@@ -596,10 +596,12 @@ impl<'a, 'b> FullParams<'a, 'b> {
             Some(closure) => {
                 self.fp.progress_callback = Some(trampoline::<Box<dyn FnMut(i32)>>);
                 let boxed_closure = Box::new(closure) as Box<dyn FnMut(i32)>;
-                let boxed_closure = Box::new(boxed_closure);
-                let raw_ptr = Box::into_raw(boxed_closure);
-                self.fp.progress_callback_user_data = raw_ptr as *mut c_void;
-                self.progress_callback_safe = None;
+                // Owned by the struct so the closure is freed when the last
+                // clone of `FullParams` drops; the trampoline reads the
+                // `Box<dyn FnMut(i32)>` stored inside the `Arc`.
+                let boxed_closure = Arc::new(boxed_closure);
+                self.fp.progress_callback_user_data = Arc::as_ptr(&boxed_closure) as *mut c_void;
+                self.progress_callback_safe = Some(boxed_closure);
             }
             None => {
                 self.fp.progress_callback = None;
@@ -637,14 +639,16 @@ impl<'a, 'b> FullParams<'a, 'b> {
             Some(closure) => {
                 // Stable address
                 let closure = Box::new(closure) as Box<dyn FnMut() -> bool>;
-                // Thin pointer
-                let closure = Box::new(closure);
-                // Raw pointer
-                let closure = Box::into_raw(closure);
-
-                self.fp.abort_callback = Some(trampoline::<F>);
-                self.fp.abort_callback_user_data = closure as *mut c_void;
-                self.abort_callback_safe = None;
+                // Owned by the struct so the closure is freed when the last
+                // clone of `FullParams` drops. The trampoline must be
+                // instantiated with the stored type `Box<dyn FnMut() -> bool>`,
+                // not the caller's `F`: `user_data` points at the boxed trait
+                // object, and dereferencing it as `F` reads past the
+                // allocation and never consults the real closure.
+                let closure = Arc::new(closure);
+                self.fp.abort_callback = Some(trampoline::<Box<dyn FnMut() -> bool>>);
+                self.fp.abort_callback_user_data = Arc::as_ptr(&closure) as *mut c_void;
+                self.abort_callback_safe = Some(closure);
             }
             None => {
                 self.fp.abort_callback = None;
