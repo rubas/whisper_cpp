@@ -6,8 +6,9 @@ defmodule WhisperCpp do
   [`whisper-rs`](https://codeberg.org/tazz4843/whisper-rs) crate, calling
   whisper.cpp's C API through a Rustler NIF. No `whisper-cli` subprocess,
   no Python, no temporary files. Structured per-segment results,
-  `:initial_prompt` biasing, word-level timestamps, and CUDA / ROCm
-  (hipBLAS) / Metal / CPU backends.
+  `:initial_prompt` biasing, word-level timestamps, built-in silero
+  voice activity detection, and CUDA / ROCm (hipBLAS) / Metal / CPU
+  backends.
 
   ## Quickstart
 
@@ -62,13 +63,18 @@ defmodule WhisperCpp do
           | {:n_threads, pos_integer()}
           | {:n_max_text_ctx, non_neg_integer()}
           | {:offset_ms, non_neg_integer()}
-          | {:duration_ms, non_neg_integer()}
+          | {:duration_ms, pos_integer()}
           | {:no_speech_thold, float()}
           | {:logprob_thold, float()}
           | {:suppress_blank, boolean()}
           | {:suppress_non_speech_tokens, boolean()}
           | {:single_segment, boolean()}
           | {:print_progress, boolean()}
+          | {:vad_model_path, String.t() | nil}
+          | {:vad_threshold, float()}
+          | {:vad_min_speech_ms, pos_integer()}
+          | {:vad_min_silence_ms, pos_integer()}
+          | {:vad_speech_pad_ms, non_neg_integer()}
           | {:abort_handle, AbortHandle.t() | nil}
           | {:progress_pid, pid() | nil}
 
@@ -185,12 +191,28 @@ defmodule WhisperCpp do
   - `:temperature` - sampling temperature (`0.0` = greedy/beam).
   - `:n_threads` - intra-op threads. Default `4`.
   - `:n_max_text_ctx` - cap decoder context tokens.
-  - `:offset_ms`, `:duration_ms` - clip the audio window.
+  - `:offset_ms`, `:duration_ms` - clip the audio window; `:duration_ms`
+    must be at least 1.
   - `:no_speech_thold` - silence detection threshold. Default `0.6`.
   - `:logprob_thold` - reject segments with `avg_logprob` below this.
   - `:suppress_blank`, `:suppress_non_speech_tokens` - decoder suppressions.
   - `:single_segment` - force a single segment for the whole audio.
   - `:print_progress` - whisper.cpp progress to stderr.
+  - `:vad_model_path` - path to a silero VAD model in GGML format (download
+    `ggml-silero-v5.1.2.bin` from
+    <https://huggingface.co/ggml-org/whisper-vad>). When set, whisper.cpp
+    detects speech first, strips silence before the encoder, and remaps all
+    timestamps back to the original timeline. Audio that contains no speech
+    returns `{:ok, %Transcription{text: "", segments: []}}`. A path that is
+    not a regular file returns `{:error, %Error{reason: :invalid_request}}`.
+  - `:vad_threshold` - silero speech probability threshold in `0.0..1.0`;
+    frames above it count as speech. Default `0.5`.
+  - `:vad_min_speech_ms` - discard detected speech segments shorter than
+    this. Default `250`.
+  - `:vad_min_silence_ms` - a silence gap must be at least this long to end
+    a speech segment. Default `100`.
+  - `:vad_speech_pad_ms` - padding added before and after each detected
+    speech segment to avoid clipping. Default `30`.
   - `:abort_handle` - `%WhisperCpp.AbortHandle{}` whose `abort/1` cancels
     in-flight inference. The call returns `{:ok, partial_transcription}`
     with whatever segments completed before the abort took effect.
@@ -204,6 +226,7 @@ defmodule WhisperCpp do
 
   def transcribe(%Model{} = model, audio, opts) when is_list(opts) do
     with :ok <- validate_options(opts, transcribe_validators()),
+         :ok <- validate_vad_options(opts),
          {:ok, samples} <- resolve_audio(audio) do
       do_transcribe(model, samples, opts, 0.0)
     end
@@ -233,6 +256,7 @@ defmodule WhisperCpp do
       when is_binary(samples) and is_number(start_s) and is_number(end_s) and is_list(opts) do
     with :ok <- validate_slice_range(start_s, end_s),
          :ok <- validate_options(opts, transcribe_validators()),
+         :ok <- validate_vad_options(opts),
          {:ok, slice} <- Pcm.slice(samples, sample_rate(), start_s, end_s - start_s),
          {:ok, transcription} <- do_transcribe(model, slice, opts, start_s * 1.0) do
       {:ok, transcription}
@@ -399,7 +423,12 @@ defmodule WhisperCpp do
       suppress_blank: Keyword.get(opts, :suppress_blank),
       suppress_non_speech_tokens: Keyword.get(opts, :suppress_non_speech_tokens),
       single_segment: Keyword.get(opts, :single_segment),
-      print_progress: Keyword.get(opts, :print_progress)
+      print_progress: Keyword.get(opts, :print_progress),
+      vad_model_path: Keyword.get(opts, :vad_model_path),
+      vad_threshold: Keyword.get(opts, :vad_threshold),
+      vad_min_speech_ms: Keyword.get(opts, :vad_min_speech_ms),
+      vad_min_silence_ms: Keyword.get(opts, :vad_min_silence_ms),
+      vad_speech_pad_ms: Keyword.get(opts, :vad_speech_pad_ms)
     }
   end
 
@@ -417,6 +446,10 @@ defmodule WhisperCpp do
   end
 
   defp transcribe_validators do
+    Map.merge(decoding_validators(), vad_validators())
+  end
+
+  defp decoding_validators do
     %{
       language: &valid_optional_string?/1,
       translate: &is_boolean/1,
@@ -428,7 +461,7 @@ defmodule WhisperCpp do
       n_threads: &positive_integer?/1,
       n_max_text_ctx: &non_neg_integer?/1,
       offset_ms: &non_neg_integer?/1,
-      duration_ms: &non_neg_integer?/1,
+      duration_ms: &positive_integer?/1,
       no_speech_thold: &number?/1,
       logprob_thold: &number?/1,
       suppress_blank: &is_boolean/1,
@@ -437,6 +470,35 @@ defmodule WhisperCpp do
       print_progress: &is_boolean/1,
       abort_handle: &valid_abort_handle?/1,
       progress_pid: &valid_optional_pid?/1
+    }
+  end
+
+  # The vad_* tuning options only act when a VAD model is set; a silent
+  # no-op would hide caller bugs.
+  defp validate_vad_options(opts) do
+    tuning =
+      for {key, _} <- opts,
+          key in [:vad_threshold, :vad_min_speech_ms, :vad_min_silence_ms, :vad_speech_pad_ms],
+          do: key
+
+    if tuning == [] or Keyword.get(opts, :vad_model_path) != nil do
+      :ok
+    else
+      {:error,
+       Error.new(
+         :invalid_request,
+         "#{inspect(tuning)} have no effect without :vad_model_path"
+       )}
+    end
+  end
+
+  defp vad_validators do
+    %{
+      vad_model_path: &valid_optional_string?/1,
+      vad_threshold: &probability?/1,
+      vad_min_speech_ms: &positive_integer?/1,
+      vad_min_silence_ms: &positive_integer?/1,
+      vad_speech_pad_ms: &non_neg_integer?/1
     }
   end
 
@@ -470,6 +532,8 @@ defmodule WhisperCpp do
   defp valid_optional_string?(nil), do: true
   defp valid_optional_string?(value) when is_binary(value), do: String.trim(value) != ""
   defp valid_optional_string?(_), do: false
+
+  defp probability?(v), do: number?(v) and v >= 0 and v <= 1
 
   defp positive_integer?(v), do: is_integer(v) and v > 0
   defp non_neg_integer?(v), do: is_integer(v) and v >= 0

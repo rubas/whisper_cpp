@@ -175,6 +175,118 @@ defmodule WhisperCpp.IntegrationTest do
              WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm}, language: "auto", n_threads: 4)
   end
 
+  describe "built-in VAD" do
+    setup do
+      {:ok, vad_path: Fixtures.ensure_vad_model!()}
+    end
+
+    test "gates transcription on detected speech", %{model_path: model, pcm: pcm, vad_path: vad} do
+      {:ok, model_ref} = WhisperCpp.load_model(model)
+
+      assert {:ok, %WhisperCpp.Transcription{text: text, segments: [_ | _]}} =
+               WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm},
+                 language: "en",
+                 n_threads: 4,
+                 vad_model_path: vad
+               )
+
+      assert text =~ "country"
+    end
+
+    test "pure silence returns an empty transcription", %{model_path: model, vad_path: vad} do
+      {:ok, model_ref} = WhisperCpp.load_model(model)
+      silence = <<0::size(48_000 * 4)-unit(8)>>
+
+      assert {:ok, %WhisperCpp.Transcription{text: "", segments: []}} =
+               WhisperCpp.transcribe(model_ref, {:pcm_f32, silence},
+                 language: "en",
+                 n_threads: 4,
+                 vad_model_path: vad,
+                 vad_threshold: 0.9
+               )
+    end
+
+    test "word timestamps stay within segment bounds", %{model_path: model, pcm: pcm, vad_path: vad} do
+      {:ok, model_ref} = WhisperCpp.load_model(model)
+
+      assert {:ok, %WhisperCpp.Transcription{segments: [_ | _] = segs}} =
+               WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm},
+                 language: "en",
+                 n_threads: 4,
+                 vad_model_path: vad,
+                 word_timestamps: true
+               )
+
+      for seg <- segs, words = seg.words || [], word <- words do
+        assert word.start >= seg.start - 0.2
+        assert word.end <= seg.end + 0.2
+      end
+    end
+
+    test "transcribe_slice keeps absolute timestamps", %{model_path: model, pcm: pcm, vad_path: vad} do
+      {:ok, model_ref} = WhisperCpp.load_model(model)
+
+      assert {:ok, %WhisperCpp.Transcription{segments: [first | _]}} =
+               WhisperCpp.transcribe_slice(model_ref, pcm, {2.0, 8.0},
+                 language: "en",
+                 n_threads: 4,
+                 vad_model_path: vad
+               )
+
+      assert first.start >= 2.0
+      assert first.end <= 8.5
+    end
+
+    test "tuning options reach the detector", %{model_path: model, pcm: pcm, vad_path: vad} do
+      {:ok, model_ref} = WhisperCpp.load_model(model)
+
+      assert {:ok, %WhisperCpp.Transcription{segments: [_ | _], text: text}} =
+               WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm},
+                 language: "en",
+                 n_threads: 4,
+                 vad_model_path: vad,
+                 vad_threshold: 0.3,
+                 vad_min_speech_ms: 100,
+                 vad_min_silence_ms: 50,
+                 vad_speech_pad_ms: 60
+               )
+
+      assert text =~ "country"
+    end
+
+    test "offset and duration window the original timeline", %{
+      model_path: model,
+      pcm: pcm,
+      vad_path: vad
+    } do
+      {:ok, model_ref} = WhisperCpp.load_model(model)
+
+      # The JFK clip is ~11 s. Windowing to 2..8 s must yield absolute
+      # timestamps inside that window even though VAD compresses the
+      # audio whisper actually sees.
+      assert {:ok, %WhisperCpp.Transcription{segments: [first | _] = segs}} =
+               WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm},
+                 language: "en",
+                 n_threads: 4,
+                 vad_model_path: vad,
+                 offset_ms: 2_000,
+                 duration_ms: 6_000
+               )
+
+      assert first.start >= 2.0
+      assert List.last(segs).end <= 8.5
+    end
+
+    test "a missing VAD model file is rejected", %{model_path: model, pcm: pcm} do
+      {:ok, model_ref} = WhisperCpp.load_model(model)
+
+      assert {:error, %WhisperCpp.Error{reason: :invalid_request} = error} =
+               WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm}, vad_model_path: "/nonexistent/vad.bin")
+
+      assert error.message =~ "vad_model_path"
+    end
+  end
+
   test "non-finite PCM samples are rejected", %{model_path: model} do
     {:ok, model_ref} = WhisperCpp.load_model(model)
     pcm = <<0.5::little-float-32, 0x7FC0_0000::little-32, 0.5::little-float-32>>

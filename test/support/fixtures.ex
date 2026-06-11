@@ -16,6 +16,10 @@ defmodule WhisperCpp.Test.Fixtures do
 
   @model_url "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin"
 
+  # ~0.85 MB silero VAD model (MIT). v6.2.0 is available at the same base
+  # URL when an upgrade is wanted.
+  @vad_model_url "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin"
+
   @spec fixtures_dir() :: Path.t()
   def fixtures_dir do
     Path.join([File.cwd!(), "test", "fixtures"])
@@ -29,8 +33,14 @@ defmodule WhisperCpp.Test.Fixtures do
     Path.join([File.cwd!(), "test", "support", "jfk.f32le.16k.pcm"])
   end
 
+  @spec vad_model_path() :: Path.t()
+  def vad_model_path, do: Path.join(fixtures_dir(), "ggml-silero-v5.1.2.bin")
+
   @spec ensure_model!() :: Path.t()
   def ensure_model!, do: ensure_file!(model_path(), @model_url)
+
+  @spec ensure_vad_model!() :: Path.t()
+  def ensure_vad_model!, do: ensure_file!(vad_model_path(), @vad_model_url)
 
   @doc """
   Returns the JFK sample as a binary of little-endian f32 mono samples

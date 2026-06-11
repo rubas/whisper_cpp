@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
 use crate::errors::{ErrorContext as _, inference_error, invalid_request};
+use crate::vad::{self, VadOutcome};
 use rustler::{Encoder, LocalPid, OwnedEnv};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
 
@@ -29,6 +30,11 @@ pub(crate) struct TranscribeRequest {
     pub(crate) suppress_non_speech_tokens: Option<bool>,
     pub(crate) single_segment: Option<bool>,
     pub(crate) print_progress: bool,
+    pub(crate) vad_model_path: Option<String>,
+    pub(crate) vad_threshold: Option<f32>,
+    pub(crate) vad_min_speech_ms: Option<u32>,
+    pub(crate) vad_min_silence_ms: Option<u32>,
+    pub(crate) vad_speech_pad_ms: Option<u32>,
 }
 
 pub(crate) struct WordResult {
@@ -58,7 +64,7 @@ pub(crate) struct TranscriptionResult {
 /// APIs that use `i32`. Realistic values (thread counts, beam sizes,
 /// millisecond offsets) never overflow.
 #[inline]
-fn u32_to_i32(n: u32) -> i32 {
+pub(crate) fn u32_to_i32(n: u32) -> i32 {
     i32::try_from(n).unwrap_or(i32::MAX)
 }
 
@@ -119,11 +125,16 @@ fn build_params<'a>(req: &'a TranscribeRequest, language: Option<&'a str>) -> Fu
     if let Some(c) = req.n_max_text_ctx {
         params.set_n_max_text_ctx(u32_to_i32(c));
     }
-    if let Some(o) = req.offset_ms {
-        params.set_offset_ms(u32_to_i32(o));
-    }
-    if let Some(d) = req.duration_ms {
-        params.set_duration_ms(u32_to_i32(d));
+    // With VAD active the window is cut from the original buffer before
+    // detection (see `transcribe_one`); whisper must then see the whole
+    // filtered buffer, not a window of it.
+    if req.vad_model_path.is_none() {
+        if let Some(o) = req.offset_ms {
+            params.set_offset_ms(u32_to_i32(o));
+        }
+        if let Some(d) = req.duration_ms {
+            params.set_duration_ms(u32_to_i32(d));
+        }
     }
     if let Some(t) = req.temperature {
         params.set_temperature(t);
@@ -169,9 +180,9 @@ fn build_params<'a>(req: &'a TranscribeRequest, language: Option<&'a str>) -> Fu
 /// `OwnedEnv::send_and_clear` panics. A dedicated sender thread owns
 /// the `OwnedEnv` and reads percentages off an `mpsc` channel; the
 /// callback only forwards new values. The closure owns the channel's
-/// only `Sender`, and the vendored whisper-rs frees installed callback
-/// closures when `FullParams` drops (inside `state.full`), so the
-/// channel closes there and the thread exits.
+/// only `Sender`, and the vendored whisper-rs frees the abort and
+/// progress closures it installs when `FullParams` drops (inside
+/// `state.full`), so the channel closes there and the thread exits.
 fn install_callbacks(
     params: &mut FullParams<'_, '_>,
     abort_flag: Option<Arc<AtomicBool>>,
@@ -210,7 +221,7 @@ fn install_callbacks(
 /// model do not serialise.
 pub(crate) fn transcribe_one(
     model: &crate::WhisperResource,
-    samples: &[f32],
+    samples: Vec<f32>,
     request: &TranscribeRequest,
     abort_flag: Option<Arc<AtomicBool>>,
     progress_pid: Option<LocalPid>,
@@ -226,6 +237,46 @@ pub(crate) fn transcribe_one(
         return Err(invalid_request("initial_prompt must not contain NUL bytes"));
     }
 
+    // VAD runs before any whisper state exists: silence-only audio
+    // returns the documented empty transcription without paying for an
+    // encoder pass. `:offset_ms`/`:duration_ms` are applied here, on
+    // the original timeline - whisper.cpp would otherwise window the
+    // silence-stripped buffer instead of the audio the caller meant.
+    let vad_outcome = match request.vad_model_path {
+        Some(ref path) => {
+            let (win_start, win_end) =
+                vad::window(request.offset_ms, request.duration_ms, samples.len());
+            Some(vad::filter_speech(
+                path,
+                request,
+                &samples[win_start..win_end],
+                win_start,
+            )?)
+        }
+        None => None,
+    };
+
+    #[allow(clippy::cast_precision_loss)]
+    let duration_s = samples.len() as f32 / 16_000.0_f32;
+
+    // With VAD, whisper only sees the filtered copy: free the original
+    // buffer now instead of holding both through the whole inference.
+    let (inference_samples, vad_ranges) = match vad_outcome {
+        Some(VadOutcome::NoSpeech) => {
+            // No detection ran; report the requested language or none.
+            return Ok(TranscriptionResult {
+                language: language.unwrap_or_default(),
+                duration_s,
+                segments: Vec::new(),
+            });
+        }
+        Some(VadOutcome::Speech { filtered, ranges }) => {
+            drop(samples);
+            (filtered, Some(ranges))
+        }
+        None => (samples, None),
+    };
+
     let mut state: WhisperState = {
         let ctx_guard = model.ctx.lock();
         ctx_guard
@@ -239,7 +290,7 @@ pub(crate) fn transcribe_one(
     let abort_flag_check = abort_flag.clone();
     install_callbacks(&mut params, abort_flag, progress_pid);
 
-    if let Err(e) = state.full(params, samples) {
+    if let Err(e) = state.full(params, &inference_samples) {
         let aborted = abort_flag_check.is_some_and(|f| f.load(Ordering::SeqCst));
         if !aborted {
             return Err(inference_error(format!("whisper.cpp full() failed: {e}")));
@@ -255,6 +306,19 @@ pub(crate) fn transcribe_one(
         segments.push(extract_segment(&seg, request.word_timestamps, token_eot)?);
     }
 
+    if let Some(ref ranges) = vad_ranges {
+        for seg in &mut segments {
+            seg.start = vad::remap_seconds(ranges, seg.start);
+            seg.end = vad::remap_seconds(ranges, seg.end);
+            if let Some(ref mut words) = seg.words {
+                for word in words {
+                    word.start = vad::remap_seconds(ranges, word.start);
+                    word.end = vad::remap_seconds(ranges, word.end);
+                }
+            }
+        }
+    }
+
     let language = {
         let id = state.full_lang_id_from_state();
         whisper_rs::get_lang_str(id)
@@ -262,9 +326,6 @@ pub(crate) fn transcribe_one(
             .or(language)
             .unwrap_or_else(|| "en".to_owned())
     };
-
-    #[allow(clippy::cast_precision_loss)]
-    let duration_s = samples.len() as f32 / 16_000.0_f32;
 
     Ok(TranscriptionResult {
         language,
