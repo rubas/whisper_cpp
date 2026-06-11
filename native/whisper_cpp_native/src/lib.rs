@@ -85,7 +85,7 @@ impl From<anyhow::Error> for NativeError {
 pub(crate) struct WhisperResource {
     pub(crate) ctx: Mutex<Option<WhisperContext>>,
     sampling_rate: usize,
-    multilingual: bool,
+    pub(crate) multilingual: bool,
     n_vocab: usize,
     /// `<|endoftext|>` token id - text tokens occupy `[0, token_eot)`,
     /// everything above is timestamp / language / control. Read from the

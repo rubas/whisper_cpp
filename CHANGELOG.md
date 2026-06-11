@@ -4,7 +4,27 @@ All notable changes to `whisper_cpp` will be documented in this file. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-06-11
+
+### Changed
+- rustler 0.37 → 0.38 (Rust crate and optional Hex package). Additive
+  upstream release; no NIF API changes needed. The vendored whisper.cpp
+  stays at 1.8.3 until whisper-rs ships a release vendoring something
+  newer - upstream's latest (0.16.0, 2026-03-12) predates whisper.cpp
+  1.8.4.
+- `language: nil` now actually auto-detects on multilingual models, as the
+  docs always claimed. Previously `nil` silently fell through to
+  whisper.cpp's forced-`"en"` default, decoding non-English audio as
+  English. English-only models resolve `nil`/`"auto"` to `"en"`.
+- `:language` is validated against whisper.cpp's language table. Unknown
+  codes - including BCP 47 tags such as `"de-CH"` - return
+  `:invalid_request` instead of silently corrupting the decoder prompt
+  with an invalid language token. Passing a non-English language to an
+  English-only model is rejected the same way instead of being silently
+  ignored.
+- The `:beam_size` and `:best_of` docs state the real defaults: greedy
+  decoding with `best_of: 1`. The docs previously claimed a beam-search
+  default of 5 that no code path produced.
 
 ### Fixed
 - `:abort_handle` cancellation works now. The abort callback is passed to

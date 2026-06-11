@@ -9,7 +9,7 @@ name = "whisper_cpp_native"
 crate-type = ["cdylib"]
 
 [dependencies]
-rustler = "0.37.4"
+rustler = "0.38.0"
 # `whisper-rs` is the canonical Rust binding to whisper.cpp. It vendors
 # whisper.cpp under `sys/whisper.cpp/` and exposes cargo features that
 # toggle the upstream CMake build flags.
