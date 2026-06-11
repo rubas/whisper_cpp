@@ -79,8 +79,11 @@ impl From<anyhow::Error> for NativeError {
 /// Opaque BEAM resource holding a loaded whisper.cpp context. The mutex
 /// only wraps the brief `create_state()` step; inference itself runs
 /// without it. See `transcribe::transcribe_one`.
-struct WhisperResource {
-    ctx: Mutex<WhisperContext>,
+///
+/// `ctx` is `Some` from construction until `Drop`, which moves the
+/// context out so it can be freed off the scheduler thread.
+pub(crate) struct WhisperResource {
+    pub(crate) ctx: Mutex<Option<WhisperContext>>,
     sampling_rate: usize,
     multilingual: bool,
     n_vocab: usize,
@@ -88,11 +91,24 @@ struct WhisperResource {
     /// everything above is timestamp / language / control. Read from the
     /// loaded model at load time so the boundary stays correct across
     /// checkpoint variants (en-only vs multilingual vs future vocabs).
-    token_eot: u32,
+    pub(crate) token_eot: u32,
     device: &'static str,
 }
 
 impl rustler::Resource for WhisperResource {}
+
+/// The BEAM runs resource destructors on the normal scheduler that
+/// garbage-collects the owning process, with a ~1 ms budget. Freeing a
+/// loaded whisper context releases gigabytes of tensors (and device
+/// buffers on GPU builds), so hand it to a detached thread and let the
+/// scheduler pay only for the spawn.
+impl Drop for WhisperResource {
+    fn drop(&mut self) {
+        if let Some(ctx) = self.ctx.get_mut().take() {
+            std::thread::spawn(move || drop(ctx));
+        }
+    }
+}
 
 /// Cooperative cancellation flag. whisper.cpp polls the abort callback
 /// between encoder/decoder steps and returns early when set.
@@ -293,7 +309,7 @@ fn nif_load_model(env: Env<'_>, path: String, opts: LoadOpts) -> Term<'_> {
         let token_eot = u32::try_from(ctx.token_eot()).unwrap_or(u32::MAX);
 
         Ok(ResourceArc::new(WhisperResource {
-            ctx: Mutex::new(ctx),
+            ctx: Mutex::new(Some(ctx)),
             sampling_rate,
             multilingual,
             n_vocab,
@@ -336,10 +352,20 @@ fn decode_pcm_f32(bytes: &[u8]) -> Result<Vec<f32>, NativeError> {
         .with_detail("byte_length", bytes.len().to_string()));
     }
 
-    Ok(bytes
-        .chunks_exact(4)
-        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-        .collect())
+    let mut samples = Vec::with_capacity(bytes.len() / 4);
+    for (index, chunk) in bytes.chunks_exact(4).enumerate() {
+        let value = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        if !value.is_finite() {
+            return Err(NativeError::new(
+                "invalid_request",
+                "samples binary contains a non-finite sample (NaN or infinity); \
+                 the upstream decoder produced corrupted audio",
+            )
+            .with_detail("sample_index", index.to_string()));
+        }
+        samples.push(value);
+    }
+    Ok(samples)
 }
 
 fn build_request(opts: TranscribeOpts) -> TranscribeRequest {
@@ -382,14 +408,8 @@ fn nif_transcribe<'a>(
     let result = run_with_panic_protection(|| {
         let samples = decode_pcm_f32(bytes)?;
         let request = build_request(opts);
-        let transcription = transcribe::transcribe_one(
-            &model.ctx,
-            &samples,
-            &request,
-            model.token_eot,
-            abort_flag,
-            progress_pid,
-        )?;
+        let transcription =
+            transcribe::transcribe_one(&model, &samples, &request, abort_flag, progress_pid)?;
         Ok(NifTranscription::from(transcription))
     });
 
@@ -454,6 +474,22 @@ mod tests {
             err.details.get("byte_length").map(String::as_str),
             Some("3")
         );
+    }
+
+    #[test]
+    fn decode_pcm_f32_rejects_non_finite_samples() {
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let mut bytes = Vec::new();
+            for v in [0.5_f32, bad, -0.5] {
+                bytes.extend_from_slice(&v.to_le_bytes());
+            }
+            let err = decode_pcm_f32(&bytes).unwrap_err();
+            assert_eq!(err.r#type, "invalid_request");
+            assert_eq!(
+                err.details.get("sample_index").map(String::as_str),
+                Some("1")
+            );
+        }
     }
 
     #[test]

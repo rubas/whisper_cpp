@@ -7,9 +7,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
 use crate::errors::{ErrorContext as _, inference_error};
-use parking_lot::Mutex;
 use rustler::{Encoder, LocalPid, OwnedEnv};
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperState};
+use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
 
 /// Per-call decoding request decoded from the Elixir-side `TranscribeOpts`.
 pub(crate) struct TranscribeRequest {
@@ -127,6 +126,10 @@ fn build_params(req: &TranscribeRequest) -> FullParams<'_, '_> {
     params
 }
 
+/// Shutdown sentinel for the progress sender thread. whisper.cpp only
+/// reports progress in `0..=100`, so this can never collide.
+const PROGRESS_DONE: i32 = i32::MIN;
+
 /// Wire optional cooperative-cancellation and progress callbacks onto
 /// the `FullParams`. Both hooks are no-ops when the caller omits them.
 ///
@@ -134,39 +137,58 @@ fn build_params(req: &TranscribeRequest) -> FullParams<'_, '_> {
 /// it fires on the dirty-CPU scheduler thread where
 /// `OwnedEnv::send_and_clear` panics. A dedicated sender thread owns
 /// the `OwnedEnv` and reads percentages off an `mpsc` channel; the
-/// callback only forwards new values. When `FullParams` drops, the
-/// `Sender` drops, the channel closes, and the thread exits.
+/// callback only forwards new values.
+///
+/// whisper-rs 0.16.0 leaks both installed closures (`Box::into_raw`
+/// with no matching reclaim), so the `Sender` captured by the progress
+/// callback never drops and cannot close the channel. The returned
+/// `Sender` is the thread's shutdown path instead: the caller must send
+/// [`PROGRESS_DONE`] once `full()` has returned. Until upstream frees
+/// the closures, each call still leaks a few dozen heap bytes (and the
+/// abort path pins one `Arc<AtomicBool>` clone).
 fn install_callbacks(
     params: &mut FullParams<'_, '_>,
     abort_flag: Option<Arc<AtomicBool>>,
     progress_pid: Option<LocalPid>,
-) {
+) -> Option<mpsc::Sender<i32>> {
     if let Some(flag) = abort_flag {
-        params.set_abort_callback_safe(move || flag.load(Ordering::SeqCst));
+        // whisper-rs 0.16.0 instantiates its abort trampoline with the
+        // caller's closure type `F` but stores the closure as
+        // `Box<dyn FnMut() -> bool>`. Passing the boxed trait object
+        // makes the two agree; a bare closure is reinterpreted memory
+        // (out-of-bounds reads) and the flag is never consulted.
+        let callback: Box<dyn FnMut() -> bool> = Box::new(move || flag.load(Ordering::SeqCst));
+        params.set_abort_callback_safe(callback);
     }
-    if let Some(pid) = progress_pid {
-        let (tx, rx) = mpsc::channel::<i32>();
-        std::thread::spawn(move || {
-            while let Ok(pct) = rx.recv() {
-                let mut owned = OwnedEnv::new();
-                let _ = owned.send_and_clear(&pid, |env| {
-                    let tag = rustler::Atom::from_str(env, "whisper_progress")
-                        .expect("atom name is valid");
-                    (tag, pct).encode(env)
-                });
-            }
-        });
 
-        let mut last: i32 = -1;
-        params.set_progress_callback_safe(move |pct: i32| {
-            if pct == last {
-                return;
+    let pid = progress_pid?;
+    let (tx, rx) = mpsc::channel::<i32>();
+    std::thread::spawn(move || {
+        while let Ok(pct) = rx.recv() {
+            if pct == PROGRESS_DONE {
+                break;
             }
-            last = pct;
-            // Receiver thread has exited if this errors; nothing to do.
-            let _ = tx.send(pct);
-        });
-    }
+            let mut owned = OwnedEnv::new();
+            let _ = owned.send_and_clear(&pid, |env| {
+                let tag =
+                    rustler::Atom::from_str(env, "whisper_progress").expect("atom name is valid");
+                (tag, pct).encode(env)
+            });
+        }
+    });
+
+    let callback_tx = tx.clone();
+    let mut last: i32 = -1;
+    params.set_progress_callback_safe(move |pct: i32| {
+        if pct == last {
+            return;
+        }
+        last = pct;
+        // Receiver thread has exited if this errors; nothing to do.
+        let _ = callback_tx.send(pct);
+    });
+
+    Some(tx)
 }
 
 /// Transcribe a single PCM buffer. The context mutex is held only long
@@ -174,25 +196,35 @@ fn install_callbacks(
 /// `Arc<WhisperInnerContext>`, so parallel transcribes on one loaded
 /// model do not serialise.
 pub(crate) fn transcribe_one(
-    ctx: &Mutex<WhisperContext>,
+    model: &crate::WhisperResource,
     samples: &[f32],
     request: &TranscribeRequest,
-    token_eot: u32,
     abort_flag: Option<Arc<AtomicBool>>,
     progress_pid: Option<LocalPid>,
 ) -> anyhow::Result<TranscriptionResult> {
+    let token_eot = model.token_eot;
     let mut state: WhisperState = {
-        let ctx_guard = ctx.lock();
+        let ctx_guard = model.ctx.lock();
         ctx_guard
+            .as_ref()
+            .expect("whisper context is only taken in Drop")
             .create_state()
             .inference_error_ctx("failed to create whisper state")?
     };
 
     let mut params = build_params(request);
     let abort_flag_check = abort_flag.clone();
-    install_callbacks(&mut params, abort_flag, progress_pid);
+    let progress_done = install_callbacks(&mut params, abort_flag, progress_pid);
 
-    if let Err(e) = state.full(params, samples) {
+    let full_result = state.full(params, samples);
+
+    // whisper.cpp no longer polls the progress callback once `full()`
+    // has returned; stop the sender thread.
+    if let Some(tx) = progress_done {
+        let _ = tx.send(PROGRESS_DONE);
+    }
+
+    if let Err(e) = full_result {
         let aborted = abort_flag_check.is_some_and(|f| f.load(Ordering::SeqCst));
         if !aborted {
             return Err(inference_error(format!("whisper.cpp full() failed: {e}")));
@@ -245,12 +277,11 @@ fn extract_segment(
     let mut tokens = Vec::with_capacity(token_cap);
     let mut total_logprob = 0.0_f32;
     let mut counted: u32 = 0;
-    let mut words_acc: Option<Vec<WordResult>> = if word_timestamps {
+    let mut word_tokens: Option<Vec<WordToken>> = if word_timestamps {
         Some(Vec::new())
     } else {
         None
     };
-    let mut current_word: Option<WordResult> = None;
 
     for t in 0..n_tokens {
         let Some(tok) = seg.get_token(t) else {
@@ -269,44 +300,17 @@ fn extract_segment(
         total_logprob += data.plog;
         counted += 1;
 
-        if let Some(ref mut buf) = words_acc {
-            let tok_text = tok
-                .to_str_lossy()
-                .map(std::borrow::Cow::into_owned)
-                .unwrap_or_default();
-
-            // Skip whisper.cpp special tokens for the word stream - they
-            // carry no acoustic word content.
-            if tok_text.starts_with("[_") || tok_text.starts_with("<|") {
-                continue;
-            }
-
-            let starts_new_word = tok_text.starts_with(' ') || current_word.is_none();
-
-            if starts_new_word {
-                if let Some(word) = current_word.take() {
-                    buf.push(word);
-                }
-                current_word = Some(WordResult {
-                    text: tok_text.trim_start().to_owned(),
-                    start: cs_to_s(data.t0),
-                    end: cs_to_s(data.t1),
-                    probability: data.p,
-                });
-            } else if let Some(ref mut word) = current_word {
-                word.text.push_str(&tok_text);
-                word.end = cs_to_s(data.t1);
-                // Worst-token probability, matching faster-whisper.
-                word.probability = word.probability.min(data.p);
-            }
+        if let Some(ref mut buf) = word_tokens {
+            buf.push(WordToken {
+                bytes: tok.to_bytes().map(<[u8]>::to_vec).unwrap_or_default(),
+                t0: data.t0,
+                t1: data.t1,
+                p: data.p,
+            });
         }
     }
 
-    if let Some(ref mut buf) = words_acc
-        && let Some(word) = current_word.take()
-    {
-        buf.push(word);
-    }
+    let words_acc = word_tokens.map(assemble_words);
 
     #[allow(clippy::cast_precision_loss)]
     let avg_logprob = if counted > 0 {
@@ -326,10 +330,133 @@ fn extract_segment(
     })
 }
 
+/// One decoded token as fed to word assembly: raw text bytes plus
+/// whisper.cpp's token-level timing and probability.
+struct WordToken {
+    bytes: Vec<u8>,
+    t0: i64,
+    t1: i64,
+    p: f32,
+}
+
+/// Group decoded tokens into words. Token bytes are accumulated raw and
+/// converted to UTF-8 once per finished word: Whisper's BPE regularly
+/// splits a multibyte character across two tokens, so converting each
+/// token on its own corrupts it (e.g. "schön" becomes "sch\u{FFFD}\u{FFFD}n").
+fn assemble_words(tokens: Vec<WordToken>) -> Vec<WordResult> {
+    struct WordAcc {
+        bytes: Vec<u8>,
+        start: f32,
+        end: f32,
+        probability: f32,
+    }
+
+    impl WordAcc {
+        fn finish(self) -> WordResult {
+            WordResult {
+                text: String::from_utf8_lossy(&self.bytes).trim_start().to_owned(),
+                start: self.start,
+                end: self.end,
+                probability: self.probability,
+            }
+        }
+    }
+
+    let mut words = Vec::new();
+    let mut current: Option<WordAcc> = None;
+
+    for tok in tokens {
+        // Skip whisper.cpp special tokens for the word stream - they
+        // carry no acoustic word content.
+        if tok.bytes.starts_with(b"[_") || tok.bytes.starts_with(b"<|") {
+            continue;
+        }
+
+        // A leading space byte cannot be a fragment of a split
+        // codepoint: UTF-8 continuation bytes are always >= 0x80.
+        let starts_new_word = tok.bytes.first() == Some(&b' ') || current.is_none();
+
+        if starts_new_word {
+            if let Some(acc) = current.take() {
+                words.push(acc.finish());
+            }
+            current = Some(WordAcc {
+                start: cs_to_s(tok.t0),
+                end: cs_to_s(tok.t1),
+                probability: tok.p,
+                bytes: tok.bytes,
+            });
+        } else if let Some(ref mut acc) = current {
+            acc.bytes.extend_from_slice(&tok.bytes);
+            acc.end = cs_to_s(tok.t1);
+            // Worst-token probability, matching faster-whisper.
+            acc.probability = acc.probability.min(tok.p);
+        }
+    }
+
+    if let Some(acc) = current.take() {
+        words.push(acc.finish());
+    }
+
+    words
+}
+
 /// whisper.cpp reports timestamps in centiseconds (10 ms units).
 #[inline]
 fn cs_to_s(cs: i64) -> f32 {
     #[allow(clippy::cast_precision_loss)]
     let cs_f = cs as f32;
     cs_f / 100.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn word_token(bytes: &[u8], t0: i64, t1: i64, p: f32) -> WordToken {
+        WordToken {
+            bytes: bytes.to_vec(),
+            t0,
+            t1,
+            p,
+        }
+    }
+
+    #[test]
+    fn assemble_words_reassembles_codepoints_split_across_tokens() {
+        // "schön" with the "ö" (0xC3 0xB6) split across two BPE tokens.
+        let words = assemble_words(vec![
+            word_token(b" sch\xC3", 0, 10, 0.9),
+            word_token(b"\xB6n", 10, 20, 0.8),
+        ]);
+
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].text, "schön");
+        assert!((words[0].start - 0.0).abs() < f32::EPSILON);
+        assert!((words[0].end - 0.2).abs() < f32::EPSILON);
+        assert!((words[0].probability - 0.8).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn assemble_words_splits_on_leading_space() {
+        let words = assemble_words(vec![
+            word_token(b" ask", 0, 10, 0.9),
+            word_token(b" not", 10, 20, 0.7),
+        ]);
+
+        let texts: Vec<&str> = words.iter().map(|w| w.text.as_str()).collect();
+        assert_eq!(texts, ["ask", "not"]);
+    }
+
+    #[test]
+    fn assemble_words_skips_special_tokens() {
+        let words = assemble_words(vec![
+            word_token(b"<|endoftext|>", 0, 0, 1.0),
+            word_token(b"[_TT_50]", 0, 0, 1.0),
+            word_token(b" hi", 0, 10, 0.9),
+        ]);
+
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].text, "hi");
+    }
 }

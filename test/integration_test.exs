@@ -93,10 +93,14 @@ defmodule WhisperCpp.IntegrationTest do
     handle = WhisperCpp.AbortHandle.new()
 
     # Pre-arm the flag before inference starts so the test does not race
-    # the decode loop on fast CPUs.
+    # the decode loop on fast CPUs. whisper.cpp polls the abort callback
+    # before the first encoder step, so a pre-armed flag must cancel the
+    # run before any segment is decoded: an inert abort callback (the
+    # whisper-rs 0.16.0 trampoline type confusion) returns the full
+    # transcription here instead.
     WhisperCpp.AbortHandle.abort(handle)
 
-    assert {:ok, %WhisperCpp.Transcription{}} =
+    assert {:ok, %WhisperCpp.Transcription{text: "", segments: []}} =
              WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm},
                language: "en",
                n_threads: 4,
@@ -104,6 +108,46 @@ defmodule WhisperCpp.IntegrationTest do
              )
 
     assert WhisperCpp.AbortHandle.aborted?(handle)
+  end
+
+  if match?({:unix, :linux}, :os.type()) do
+    test "progress sender threads exit after each call", %{model_path: model, pcm: pcm} do
+      {:ok, model_ref} = WhisperCpp.load_model(model)
+      parent = self()
+
+      transcribe = fn ->
+        {:ok, _} =
+          WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm},
+            language: "en",
+            n_threads: 4,
+            progress_pid: parent
+          )
+      end
+
+      # Warm-up so lazily started BEAM/ggml thread pools do not count
+      # against the baseline.
+      transcribe.()
+      Process.sleep(200)
+      baseline = os_thread_count()
+
+      for _ <- 1..5, do: transcribe.()
+      Process.sleep(200)
+
+      growth = os_thread_count() - baseline
+      assert growth < 5, "leaked #{growth} OS threads across 5 progress_pid transcriptions"
+
+      collect_progress([])
+    end
+  end
+
+  test "non-finite PCM samples are rejected", %{model_path: model} do
+    {:ok, model_ref} = WhisperCpp.load_model(model)
+    pcm = <<0.5::little-float-32, 0x7FC0_0000::little-32, 0.5::little-float-32>>
+
+    assert {:error, %WhisperCpp.Error{reason: :invalid_request} = error} =
+             WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm}, language: "en")
+
+    assert error.message =~ "non-finite"
   end
 
   test "sub-window audio returns a clean result instead of aborting the node", %{model_path: model} do
@@ -127,5 +171,10 @@ defmodule WhisperCpp.IntegrationTest do
     after
       0 -> Enum.reverse(acc)
     end
+  end
+
+  defp os_thread_count do
+    [_, count] = Regex.run(~r/^Threads:\s*(\d+)$/m, File.read!("/proc/self/status"))
+    String.to_integer(count)
   end
 end
