@@ -161,10 +161,6 @@ fn build_params<'a>(req: &'a TranscribeRequest, language: Option<&'a str>) -> Fu
     params
 }
 
-/// Shutdown sentinel for the progress sender thread. whisper.cpp only
-/// reports progress in `0..=100`, so this can never collide.
-const PROGRESS_DONE: i32 = i32::MIN;
-
 /// Wire optional cooperative-cancellation and progress callbacks onto
 /// the `FullParams`. Both hooks are no-ops when the caller omits them.
 ///
@@ -172,37 +168,23 @@ const PROGRESS_DONE: i32 = i32::MIN;
 /// it fires on the dirty-CPU scheduler thread where
 /// `OwnedEnv::send_and_clear` panics. A dedicated sender thread owns
 /// the `OwnedEnv` and reads percentages off an `mpsc` channel; the
-/// callback only forwards new values.
-///
-/// whisper-rs 0.16.0 leaks both installed closures (`Box::into_raw`
-/// with no matching reclaim), so the `Sender` captured by the progress
-/// callback never drops and cannot close the channel. The returned
-/// `Sender` is the thread's shutdown path instead: the caller must send
-/// [`PROGRESS_DONE`] once `full()` has returned. Until upstream frees
-/// the closures, each call still leaks a few dozen heap bytes (and the
-/// abort path pins one `Arc<AtomicBool>` clone).
+/// callback only forwards new values. The closure owns the channel's
+/// only `Sender`, and the vendored whisper-rs frees installed callback
+/// closures when `FullParams` drops (inside `state.full`), so the
+/// channel closes there and the thread exits.
 fn install_callbacks(
     params: &mut FullParams<'_, '_>,
     abort_flag: Option<Arc<AtomicBool>>,
     progress_pid: Option<LocalPid>,
-) -> Option<mpsc::Sender<i32>> {
+) {
     if let Some(flag) = abort_flag {
-        // whisper-rs 0.16.0 instantiates its abort trampoline with the
-        // caller's closure type `F` but stores the closure as
-        // `Box<dyn FnMut() -> bool>`. Passing the boxed trait object
-        // makes the two agree; a bare closure is reinterpreted memory
-        // (out-of-bounds reads) and the flag is never consulted.
-        let callback: Box<dyn FnMut() -> bool> = Box::new(move || flag.load(Ordering::SeqCst));
-        params.set_abort_callback_safe(callback);
+        params.set_abort_callback_safe(move || flag.load(Ordering::SeqCst));
     }
 
-    let pid = progress_pid?;
+    let Some(pid) = progress_pid else { return };
     let (tx, rx) = mpsc::channel::<i32>();
     std::thread::spawn(move || {
         while let Ok(pct) = rx.recv() {
-            if pct == PROGRESS_DONE {
-                break;
-            }
             let mut owned = OwnedEnv::new();
             let _ = owned.send_and_clear(&pid, |env| {
                 let tag =
@@ -211,8 +193,6 @@ fn install_callbacks(
             });
         }
     });
-
-    let callback_tx = tx.clone();
     let mut last: i32 = -1;
     params.set_progress_callback_safe(move |pct: i32| {
         if pct == last {
@@ -220,10 +200,8 @@ fn install_callbacks(
         }
         last = pct;
         // Receiver thread has exited if this errors; nothing to do.
-        let _ = callback_tx.send(pct);
+        let _ = tx.send(pct);
     });
-
-    Some(tx)
 }
 
 /// Transcribe a single PCM buffer. The context mutex is held only long
@@ -259,17 +237,9 @@ pub(crate) fn transcribe_one(
 
     let mut params = build_params(request, language.as_deref());
     let abort_flag_check = abort_flag.clone();
-    let progress_done = install_callbacks(&mut params, abort_flag, progress_pid);
+    install_callbacks(&mut params, abort_flag, progress_pid);
 
-    let full_result = state.full(params, samples);
-
-    // whisper.cpp no longer polls the progress callback once `full()`
-    // has returned; stop the sender thread.
-    if let Some(tx) = progress_done {
-        let _ = tx.send(PROGRESS_DONE);
-    }
-
-    if let Err(e) = full_result {
+    if let Err(e) = state.full(params, samples) {
         let aborted = abort_flag_check.is_some_and(|f| f.load(Ordering::SeqCst));
         if !aborted {
             return Err(inference_error(format!("whisper.cpp full() failed: {e}")));

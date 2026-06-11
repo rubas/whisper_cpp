@@ -376,8 +376,7 @@ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 [[package]]
 name = "whisper-rs"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2088172d00f936c348d6a72f488dc2660ab3f507263a195df308a3c2383229f6"
+source = "git+https://github.com/rubas/whisper_cpp.git?rev=1e948f1b1a41617044ba2b1213dfe50bfeac73a2#1e948f1b1a41617044ba2b1213dfe50bfeac73a2"
 dependencies = [
  "libc",
  "whisper-rs-sys",
@@ -386,7 +385,7 @@ dependencies = [
 [[package]]
 name = "whisper-rs-sys"
 version = "0.15.0"
-source = "git+https://github.com/rubas/whisper_cpp.git?rev=2e68379f58c482da6e1aebf4c3f979fbd49de643#2e68379f58c482da6e1aebf4c3f979fbd49de643"
+source = "git+https://github.com/rubas/whisper_cpp.git?rev=1e948f1b1a41617044ba2b1213dfe50bfeac73a2#1e948f1b1a41617044ba2b1213dfe50bfeac73a2"
 dependencies = [
  "bindgen",
  "cfg-if",
