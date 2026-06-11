@@ -47,3 +47,11 @@ doc_markdown = "allow"
 opt-level = 3
 lto = "thin"
 codegen-units = 1
+
+# whisper-rs 0.16.0 vendors whisper.cpp 1.8.3 and upstream has shipped no
+# newer release (issue #18). The `vendor/whisper-rs-sys-1.8.6` branch of
+# this repo carries the published whisper-rs-sys 0.15.0 with only the
+# whisper.cpp submodule bumped to v1.8.6; drop this patch once a
+# whisper-rs release re-vendors.
+[patch.crates-io]
+whisper-rs-sys = { git = "https://github.com/rubas/whisper_cpp.git", rev = "2e68379f58c482da6e1aebf4c3f979fbd49de643" }

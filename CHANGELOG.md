@@ -4,6 +4,18 @@ All notable changes to `whisper_cpp` will be documented in this file. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-06-11
+
+### Changed
+- Vendored whisper.cpp 1.8.3 -> 1.8.6. whisper-rs has no release vendoring
+  anything newer, so `whisper-rs-sys` is patched via `[patch.crates-io]` to
+  this repo's `vendor/whisper-rs-sys-1.8.6` branch - the published
+  whisper-rs-sys 0.15.0 with only its whisper.cpp submodule bumped. The
+  patch applies to source builds and the precompiled NIF artefacts alike,
+  and is dropped as soon as upstream re-vendors (see issue #18).
+- CI: `sccache-action` v0.0.9 -> v0.0.10 (Node 24; GitHub retires the
+  Node 20 runtime on 2026-06-16).
+
 ## [0.3.0] - 2026-06-11
 
 ### Changed
