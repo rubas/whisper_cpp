@@ -147,11 +147,13 @@ unsafe impl Sync for WhisperVadContext {}
 
 impl WhisperVadContext {
     pub fn new(model_path: &str, params: WhisperVadContextParams) -> Result<Self, WhisperError> {
-        let model_path = CString::new(model_path)
-            .expect("VAD model path contains null byte")
-            .into_raw() as *const c_char;
-        let ptr =
-            unsafe { whisper_vad_init_from_file_with_params(model_path, params.into_inner()) };
+        // Stack-owned like the main context wrapper: whisper.cpp copies
+        // the path during init, so handing it a leaked `into_raw`
+        // pointer only leaks one allocation per context.
+        let model_path = CString::new(model_path)?;
+        let ptr = unsafe {
+            whisper_vad_init_from_file_with_params(model_path.as_ptr(), params.into_inner())
+        };
 
         if ptr.is_null() {
             Err(WhisperError::NullPointer)
