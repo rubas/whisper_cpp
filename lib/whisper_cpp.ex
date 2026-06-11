@@ -254,9 +254,9 @@ defmodule WhisperCpp do
 
   def transcribe_slice(%Model{} = model, samples, {start_s, end_s}, opts)
       when is_binary(samples) and is_number(start_s) and is_number(end_s) and is_list(opts) do
-    with :ok <- validate_slice_range(start_s, end_s),
-         :ok <- validate_options(opts, transcribe_validators()),
+    with :ok <- validate_options(opts, transcribe_validators()),
          :ok <- validate_vad_options(opts),
+         :ok <- validate_slice_range(start_s, end_s),
          {:ok, slice} <- Pcm.slice(samples, sample_rate(), start_s, end_s - start_s),
          {:ok, transcription} <- do_transcribe(model, slice, opts, start_s * 1.0) do
       {:ok, transcription}
@@ -492,13 +492,18 @@ defmodule WhisperCpp do
     end
   end
 
+  # whisper.cpp converts the millisecond knobs to sample counts in a C
+  # int; values past ~134 s would overflow inside the detector. Two
+  # minutes is far beyond any useful setting.
+  @vad_ms_max 120_000
+
   defp vad_validators do
     %{
       vad_model_path: &valid_optional_string?/1,
       vad_threshold: &probability?/1,
-      vad_min_speech_ms: &positive_integer?/1,
-      vad_min_silence_ms: &positive_integer?/1,
-      vad_speech_pad_ms: &non_neg_integer?/1
+      vad_min_speech_ms: &(positive_integer?(&1) and &1 <= @vad_ms_max),
+      vad_min_silence_ms: &(positive_integer?(&1) and &1 <= @vad_ms_max),
+      vad_speech_pad_ms: &(non_neg_integer?(&1) and &1 <= @vad_ms_max)
     }
   end
 
@@ -535,8 +540,12 @@ defmodule WhisperCpp do
 
   defp probability?(v), do: number?(v) and v >= 0 and v <= 1
 
-  defp positive_integer?(v), do: is_integer(v) and v > 0
-  defp non_neg_integer?(v), do: is_integer(v) and v >= 0
+  # The NIF decodes integer options as u32; larger values would raise a
+  # decode ArgumentError instead of returning :invalid_request.
+  @u32_max 4_294_967_295
+
+  defp positive_integer?(v), do: is_integer(v) and v > 0 and v <= @u32_max
+  defp non_neg_integer?(v), do: is_integer(v) and v >= 0 and v <= @u32_max
   defp number?(v), do: is_integer(v) or is_float(v)
   defp non_neg_number?(v), do: number?(v) and v >= 0
 end

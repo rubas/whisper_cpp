@@ -402,6 +402,7 @@ dependencies = [
  "parking_lot",
  "rustler",
  "whisper-rs",
+ "whisper-rs-sys",
 ]
 
 [[package]]
