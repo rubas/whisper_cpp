@@ -31,6 +31,25 @@ mod atoms {
 }
 use atoms::{error, ok};
 
+#[cfg(any(
+    all(feature = "cuda", feature = "hipblas"),
+    all(feature = "cuda", feature = "vulkan"),
+    all(feature = "cuda", feature = "metal"),
+    all(feature = "cuda", feature = "coreml"),
+    all(feature = "cuda", feature = "intel-sycl"),
+    all(feature = "hipblas", feature = "vulkan"),
+    all(feature = "hipblas", feature = "metal"),
+    all(feature = "hipblas", feature = "coreml"),
+    all(feature = "hipblas", feature = "intel-sycl"),
+    all(feature = "vulkan", feature = "metal"),
+    all(feature = "vulkan", feature = "coreml"),
+    all(feature = "vulkan", feature = "intel-sycl"),
+    all(feature = "metal", feature = "coreml"),
+    all(feature = "metal", feature = "intel-sycl"),
+    all(feature = "coreml", feature = "intel-sycl"),
+))]
+compile_error!("enable at most one GPU backend feature per artefact");
+
 /// `Some(label)` when this build was compiled with a GPU cargo feature.
 /// At most one GPU backend is active per artefact.
 const GPU_BACKEND: Option<&str> = if cfg!(feature = "cuda") {
@@ -74,7 +93,14 @@ impl NativeError {
 impl From<anyhow::Error> for NativeError {
     fn from(err: anyhow::Error) -> Self {
         let kind = kind_from_chain(&err).unwrap_or("inference_error");
-        NativeError::new(kind, format!("{err:#}"))
+        // The Kind tag is routing metadata; keep it out of the message.
+        let message = err
+            .chain()
+            .filter(|cause| cause.downcast_ref::<errors::Kind>().is_none())
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(": ");
+        NativeError::new(kind, message)
     }
 }
 
@@ -446,6 +472,15 @@ fn nif_transcribe<'a>(
     });
 
     encode_result(env, result)
+}
+
+/// Reports whether whisper.cpp's static language table knows `lang`
+/// (ISO 639-1 code or full name); `"auto"` is always accepted. Needs no
+/// loaded model - the table is compiled into whisper.cpp.
+#[rustler::nif]
+#[allow(clippy::needless_pass_by_value)]
+fn nif_known_language(lang: String) -> bool {
+    lang == "auto" || (!lang.contains('\0') && whisper_rs::get_lang_id(&lang).is_some())
 }
 
 /// Allocates a fresh cooperative-cancellation flag.

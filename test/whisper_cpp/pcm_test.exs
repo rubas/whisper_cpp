@@ -67,4 +67,11 @@ defmodule WhisperCpp.PcmTest do
       assert Pcm.duration_s(<<>>, 16_000) == 0.0
     end
   end
+
+  test "float subtraction artefacts round to the intended sample count" do
+    # 2.3 - 2.0 == 0.2999999999999998; truncation used to drop a sample.
+    buffer = <<0::size(16_000 * 4 * 4)-unit(8)>>
+    assert {:ok, slice} = WhisperCpp.Pcm.slice(buffer, 16_000, 0.0, 2.3 - 2.0)
+    assert byte_size(slice) == 4_800 * 4
+  end
 end

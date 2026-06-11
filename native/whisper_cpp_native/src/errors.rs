@@ -8,7 +8,7 @@ const KIND_INVALID_REQUEST: &str = "invalid_request";
 const KIND_LOAD_ERROR: &str = "load_error";
 
 #[derive(Debug, Clone, Copy)]
-struct Kind(&'static str);
+pub(crate) struct Kind(&'static str);
 
 impl std::fmt::Display for Kind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

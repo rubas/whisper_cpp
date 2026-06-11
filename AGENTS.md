@@ -62,12 +62,13 @@ backends so users select them at install time via `WHISPER_CPP_VARIANT`.
 - Integration tests are tagged `:integration` and excluded by default;
   they download fixtures on first run.
 - Cross-language errors are categorised on the Rust side via
-  `errors::{invalid_request, load_error, inference_error, runtime_error}`
-  and decoded back to atoms on the Elixir side in `WhisperCpp.Error`.
+  `errors::{invalid_request, load_error, inference_error}` and decoded
+  back to atoms on the Elixir side in `WhisperCpp.Error` (which also
+  knows `:runtime_error`, `:nif_panic`, and `:native_error`).
 - No silent fallbacks: a typo'd audio path returns an error, not garbage
   PCM. An unknown option returns an error, not a default.
-- Stick to whisper.cpp's published 16 kHz contract; the WAV decoder
-  rejects other sample rates and tells the caller to resample upstream.
+- Stick to whisper.cpp's published 16 kHz contract; there is no decoder
+  in this library - callers resample and decode upstream.
 
 ## Local commands
 
@@ -92,7 +93,7 @@ task check           # full local gate
    then commit and push it:
 
    ```bash
-   mix rustler_precompiled.download WhisperCpp.Native --all --ignore-unavailable --print
+   mix rustler_precompiled.download WhisperCpp.Native --all --no-config --ignore-unavailable --print
    jj describe -m "chore: update NIF checksum for v$(...)" && jj git push -b main
    ```
 
