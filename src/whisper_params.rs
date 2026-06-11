@@ -107,6 +107,16 @@ impl<'a, 'b> FullParams<'a, 'b> {
         self.fp.n_threads = n_threads;
     }
 
+    /// Set `greedy.best_of` independently of the sampling strategy.
+    ///
+    /// whisper.cpp consults `greedy.best_of` for the decoder count even
+    /// in beam-search mode (temperature-fallback passes sample
+    /// greedily), but [`SamplingStrategy::BeamSearch`] has no field for
+    /// it and the constructor only writes the chosen strategy's struct.
+    pub fn set_greedy_best_of(&mut self, best_of: c_int) {
+        self.fp.greedy.best_of = best_of;
+    }
+
     /// Max tokens to use from past text as prompt for the decoder
     ///
     /// Defaults to 16384.
