@@ -6,6 +6,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+- `language: nil` now actually auto-detects on multilingual models, as the
+  docs always claimed. Previously `nil` silently fell through to
+  whisper.cpp's forced-`"en"` default, decoding non-English audio as
+  English. English-only models resolve `nil`/`"auto"` to `"en"`.
+- `:language` is validated against whisper.cpp's language table. Unknown
+  codes - including BCP 47 tags such as `"de-CH"` - return
+  `:invalid_request` instead of silently corrupting the decoder prompt
+  with an invalid language token. Passing a non-English language to an
+  English-only model is rejected the same way instead of being silently
+  ignored.
+- The `:beam_size` and `:best_of` docs state the real defaults: greedy
+  decoding with `best_of: 1`. The docs previously claimed a beam-search
+  default of 5 that no code path produced.
+
 ### Fixed
 - `:abort_handle` cancellation works now. The abort callback is passed to
   whisper-rs as a boxed trait object so the trampoline polls the real flag;

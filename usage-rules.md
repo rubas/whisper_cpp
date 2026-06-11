@@ -63,6 +63,11 @@ consistent set of conventions.
 - Pass options as keyword lists. Unknown keys and out-of-range values
   fail with `{:error, %WhisperCpp.Error{reason: :invalid_request}}`
   before reaching the NIF - rely on this for input validation.
+- `:language` takes an ISO 639-1 code (`"de"`), a full language name
+  (`"german"`), or `"auto"`. Unknown codes - including BCP 47 tags like
+  `"de-CH"` - return `:invalid_request`. `nil` (default) auto-detects on
+  multilingual models; English-only models resolve `nil`/`"auto"` to
+  `"en"` and reject other languages.
 - Match `%WhisperCpp.Error{}` (or its `:reason` field) rather than
   inspecting message strings.
 

@@ -140,6 +140,41 @@ defmodule WhisperCpp.IntegrationTest do
     end
   end
 
+  test "language is validated against whisper.cpp's table", %{model_path: model, pcm: pcm} do
+    {:ok, model_ref} = WhisperCpp.load_model(model)
+
+    # BCP 47 tags and unknown codes are rejected instead of silently
+    # corrupting the decoder prompt.
+    assert {:error, %WhisperCpp.Error{reason: :invalid_request} = error} =
+             WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm}, language: "de-CH")
+
+    assert error.message =~ "unknown language"
+
+    # Embedded NUL bytes stay on the :invalid_request path; unchecked
+    # they panic inside whisper-rs's CString conversion (:nif_panic).
+    assert {:error, %WhisperCpp.Error{reason: :invalid_request}} =
+             WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm}, language: "en" <> <<0>>)
+
+    assert {:error, %WhisperCpp.Error{reason: :invalid_request}} =
+             WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm},
+               language: "en",
+               initial_prompt: "context" <> <<0>>
+             )
+
+    # tiny.en is English-only: other languages are rejected, not ignored.
+    assert {:error, %WhisperCpp.Error{reason: :invalid_request} = error} =
+             WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm}, language: "de")
+
+    assert error.message =~ "English-only"
+
+    # nil and "auto" resolve to "en" on English-only models.
+    assert {:ok, %WhisperCpp.Transcription{language: "en", segments: [_ | _]}} =
+             WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm}, n_threads: 4)
+
+    assert {:ok, %WhisperCpp.Transcription{language: "en"}} =
+             WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm}, language: "auto", n_threads: 4)
+  end
+
   test "non-finite PCM samples are rejected", %{model_path: model} do
     {:ok, model_ref} = WhisperCpp.load_model(model)
     pcm = <<0.5::little-float-32, 0x7FC0_0000::little-32, 0.5::little-float-32>>

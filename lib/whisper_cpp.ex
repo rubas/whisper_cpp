@@ -169,15 +169,19 @@ defmodule WhisperCpp do
 
   ## Options
 
-  - `:language` - ISO code (`"en"`). `nil` (default) auto-detects on
-    multilingual models; auto-detect on monolingual models always returns
-    `"en"`.
+  - `:language` - ISO 639-1 code (`"de"`), a full language name whisper.cpp
+    knows (`"german"`), or `"auto"`. `nil` (default) auto-detects on
+    multilingual models; English-only models resolve `nil`/`"auto"` to
+    `"en"` and reject any other language. Unknown codes - including BCP 47
+    tags such as `"de-CH"` - return `{:error, %Error{reason: :invalid_request}}`.
   - `:translate` - translate to English instead of transcribing.
   - `:initial_prompt` - free-text context prepended via `<|startofprev|>`
     to bias decoding (max ~224 tokens).
   - `:word_timestamps` - attach per-word timing. Default `false`.
-  - `:beam_size` - beam-search width. Default `5`.
-  - `:best_of` - greedy candidates kept when `beam_size <= 1`.
+  - `:beam_size` - beam-search width; `2` or higher enables beam search.
+    Default: greedy decoding (no beam search).
+  - `:best_of` - greedy decoding candidates kept when beam search is off.
+    Default `1`.
   - `:temperature` - sampling temperature (`0.0` = greedy/beam).
   - `:n_threads` - intra-op threads. Default `4`.
   - `:n_max_text_ctx` - cap decoder context tokens.

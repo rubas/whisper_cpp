@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
-use crate::errors::{ErrorContext as _, inference_error};
+use crate::errors::{ErrorContext as _, inference_error, invalid_request};
 use rustler::{Encoder, LocalPid, OwnedEnv};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
 
@@ -62,9 +62,45 @@ fn u32_to_i32(n: u32) -> i32 {
     i32::try_from(n).unwrap_or(i32::MAX)
 }
 
+/// Resolve the caller's language request against whisper.cpp's language
+/// table and the loaded model. `Ok(None)` means auto-detect.
+///
+/// English-only checkpoints never auto-detect: whisper.cpp's detection
+/// pass scores language tokens the model was not trained with, so `nil`
+/// and `"auto"` resolve to `"en"` and any other language is rejected.
+fn resolve_language(requested: Option<&str>, multilingual: bool) -> anyhow::Result<Option<String>> {
+    match requested {
+        None | Some("auto") => {
+            if multilingual {
+                Ok(None)
+            } else {
+                Ok(Some("en".to_owned()))
+            }
+        }
+        Some(lang) => {
+            // Check NUL before `get_lang_id`: whisper-rs builds a CString
+            // from the value and panics on embedded NUL bytes.
+            if lang.contains('\0') || whisper_rs::get_lang_id(lang).is_none() {
+                return Err(invalid_request(format!(
+                    "unknown language {lang:?}; pass an ISO 639-1 code whisper.cpp \
+                     supports (e.g. \"de\"), a full language name (\"german\"), or \"auto\""
+                )));
+            }
+            if !multilingual && lang != "en" && lang != "english" {
+                return Err(invalid_request(format!(
+                    "model is English-only; language {lang:?} is unavailable \
+                     (use \"en\", \"auto\", or omit the option)"
+                )));
+            }
+            Ok(Some(lang.to_owned()))
+        }
+    }
+}
+
 /// Build a `FullParams` from the request. Sampling strategy is beam-search
-/// when `beam_size > 1`, otherwise greedy.
-fn build_params(req: &TranscribeRequest) -> FullParams<'_, '_> {
+/// when `beam_size > 1`, otherwise greedy. `language: None` selects
+/// whisper.cpp's auto-detection.
+fn build_params<'a>(req: &'a TranscribeRequest, language: Option<&'a str>) -> FullParams<'a, 'a> {
     let strategy = match req.beam_size {
         Some(n) if n > 1 => SamplingStrategy::BeamSearch {
             beam_size: u32_to_i32(n),
@@ -110,9 +146,8 @@ fn build_params(req: &TranscribeRequest) -> FullParams<'_, '_> {
     if req.translate {
         params.set_translate(true);
     }
-    if let Some(ref lang) = req.language {
-        params.set_language(Some(lang.as_str()));
-    }
+    // `None` clears whisper.cpp's "en" default and turns on auto-detection.
+    params.set_language(language);
     if let Some(ref prompt) = req.initial_prompt {
         params.set_initial_prompt(prompt);
     }
@@ -203,6 +238,16 @@ pub(crate) fn transcribe_one(
     progress_pid: Option<LocalPid>,
 ) -> anyhow::Result<TranscriptionResult> {
     let token_eot = model.token_eot;
+    let language = resolve_language(request.language.as_deref(), model.multilingual)?;
+
+    // whisper-rs's `set_initial_prompt` panics on embedded NUL bytes
+    // (CString conversion); reject them as a caller error instead.
+    if let Some(ref prompt) = request.initial_prompt
+        && prompt.contains('\0')
+    {
+        return Err(invalid_request("initial_prompt must not contain NUL bytes"));
+    }
+
     let mut state: WhisperState = {
         let ctx_guard = model.ctx.lock();
         ctx_guard
@@ -212,7 +257,7 @@ pub(crate) fn transcribe_one(
             .inference_error_ctx("failed to create whisper state")?
     };
 
-    let mut params = build_params(request);
+    let mut params = build_params(request, language.as_deref());
     let abort_flag_check = abort_flag.clone();
     let progress_done = install_callbacks(&mut params, abort_flag, progress_pid);
 
@@ -244,7 +289,7 @@ pub(crate) fn transcribe_one(
         let id = state.full_lang_id_from_state();
         whisper_rs::get_lang_str(id)
             .map(str::to_owned)
-            .or_else(|| request.language.clone())
+            .or(language)
             .unwrap_or_else(|| "en".to_owned())
     };
 
@@ -412,6 +457,51 @@ fn cs_to_s(cs: i64) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::errors::kind_from_chain;
+
+    #[test]
+    fn resolve_language_accepts_codes_and_full_names() {
+        assert_eq!(
+            resolve_language(Some("de"), true).unwrap(),
+            Some("de".to_owned())
+        );
+        assert_eq!(
+            resolve_language(Some("german"), true).unwrap(),
+            Some("german".to_owned())
+        );
+        assert_eq!(
+            resolve_language(Some("en"), false).unwrap(),
+            Some("en".to_owned())
+        );
+    }
+
+    #[test]
+    fn resolve_language_maps_nil_and_auto_per_model() {
+        assert_eq!(resolve_language(None, true).unwrap(), None);
+        assert_eq!(resolve_language(Some("auto"), true).unwrap(), None);
+        assert_eq!(
+            resolve_language(None, false).unwrap(),
+            Some("en".to_owned())
+        );
+        assert_eq!(
+            resolve_language(Some("auto"), false).unwrap(),
+            Some("en".to_owned())
+        );
+    }
+
+    #[test]
+    fn resolve_language_rejects_unknown_codes() {
+        for bad in ["de-CH", "gsw", "klingon", " ", "en\0", "\0", "de\0ch"] {
+            let err = resolve_language(Some(bad), true).unwrap_err();
+            assert_eq!(kind_from_chain(&err), Some("invalid_request"), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn resolve_language_rejects_non_english_on_english_only_models() {
+        let err = resolve_language(Some("de"), false).unwrap_err();
+        assert_eq!(kind_from_chain(&err), Some("invalid_request"));
+    }
 
     fn word_token(bytes: &[u8], t0: i64, t1: i64, p: f32) -> WordToken {
         WordToken {
