@@ -80,7 +80,7 @@ defmodule WhisperCpp.MixProject do
   defp deps do
     [
       {:rustler_precompiled, "~> 0.9.0"},
-      {:rustler, "~> 0.37.3", optional: true},
+      {:rustler, "~> 0.38.0", optional: true},
       {:credo, "~> 1.7.18", only: [:dev, :test], runtime: false},
       {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false},
       {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false},
