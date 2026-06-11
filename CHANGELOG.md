@@ -4,6 +4,77 @@ All notable changes to `whisper_cpp` will be documented in this file. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-06-11
+
+### Added
+- Built-in voice activity detection: pass `:vad_model_path` (a silero GGML
+  model from `huggingface.co/ggml-org/whisper-vad`) to strip silence before
+  the encoder, with `:vad_threshold`, `:vad_min_speech_ms`,
+  `:vad_min_silence_ms`, and `:vad_speech_pad_ms` tuning options. Audio
+  with no detected speech returns an empty transcription. The NIF runs the
+  VAD itself and remaps all timestamps back to the original timeline -
+  whisper.cpp's own VAD hook is dead code on the state-based API whisper-rs
+  uses.
+
+### Changed
+- Native whisper.cpp/GGML logging is filtered to warnings and errors;
+  the dozens of info lines per model load no longer reach stderr.
+  `WHISPER_CPP_NATIVE_LOG` accepts `none`, `error`, `warn` (default),
+  `info`, and `debug`. VAD contexts stay per-call: loading the silero
+  model costs about a millisecond, and a shared context would serialise
+  detection across concurrent transcribes.
+- Integer options are bounded to `u32` and the VAD millisecond knobs to
+  two minutes, returning `:invalid_request` instead of raising or
+  overflowing inside the detector. Option validation now also runs
+  before the sub-0.3 s `transcribe_slice` short-circuit, and an abort
+  raised during the VAD pass is honoured before the encoder starts.
+- `:duration_ms` must be at least 1. `0` previously meant "whole audio"
+  without VAD but "empty window" with it; the ambiguity is rejected as
+  `:invalid_request`.
+- Passing `:vad_threshold`, `:vad_min_speech_ms`, `:vad_min_silence_ms`,
+  or `:vad_speech_pad_ms` without `:vad_model_path` returns
+  `:invalid_request` instead of being silently ignored.
+- Buffers above `i32::MAX` samples (about 37 hours) are rejected instead
+  of silently truncating at the FFI boundary.
+
+### Fixed
+- Multi-segment transcriptions no longer contain doubled spaces in
+  `Transcription.text` (whisper segments carry their own leading space;
+  the join added another). Space-free scripts no longer gain spurious
+  spaces.
+- `:temperature` is validated to `0.0..1.0` (above 1.0 whisper.cpp's
+  retry ladder is empty and the decoder state undefined), `:n_threads`
+  to GGML's 512-thread abort threshold, and `:beam_size`/`:best_of` to
+  whisper.cpp's 8-decoder limit - all returning `:invalid_request`
+  instead of native crashes or opaque inference errors.
+- `:best_of` defaults to 5, matching whisper.cpp, and now also applies
+  to temperature-fallback passes in beam-search mode.
+- Sub-0.3 s `transcribe_slice` windows validate options, buffer bounds,
+  and alignment before returning the documented empty transcription, and
+  a window of exactly 0.3 s transcribes instead of being dropped by
+  float subtraction error. The empty result keeps the pinned language.
+- `translate: true` on English-only models returns `:invalid_request`
+  instead of being silently ignored; `use_gpu: false` wins over a
+  conflicting `:device`; invalid UTF-8 string options and non-keyword
+  option lists return `:invalid_request` instead of raising.
+- Native error messages no longer leak the internal "kind=..." routing
+  tag; results with no decoded segments echo the requested language
+  instead of fabricating "en"; progress percentages are clamped to the
+  documented 0..100.
+- `Pcm.slice/4` rounds sample positions instead of truncating, so
+  millisecond-precise windows keep their last sample.
+- Builds with two GPU features fail at compile time instead of silently
+  picking one; unknown `WHISPER_CPP_VARIANT` values fail the build
+  instead of falling back to the CPU artefact.
+- `:abort_handle` and `:progress_pid` callbacks no longer leak memory per
+  call: the vendored whisper-rs (branch `vendor/whisper-rs-0.16.0-patched`)
+  fixes the abort-trampoline type confusion and the callback closure leak
+  at the source (upstream issues 277/271, fix PR 278), replacing the
+  downstream pre-boxing and sentinel workarounds. The progress sender
+  thread now exits via natural channel close. The same vendor patch stops
+  `set_language`, `set_initial_prompt`, and the VAD path from leaking one
+  `CString` per call.
+
 ## [0.3.1] - 2026-06-11
 
 ### Changed
