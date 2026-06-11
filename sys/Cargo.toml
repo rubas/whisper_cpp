@@ -2,7 +2,7 @@
 name = "whisper-rs-sys"
 version = "0.15.0"
 edition = "2021"
-rust-version.workspace = true
+rust-version = "1.88.0"
 description = "Rust bindings for whisper.cpp (FFI bindings)"
 license = "Unlicense"
 documentation = "https://docs.rs/whisper-rs-sys"
