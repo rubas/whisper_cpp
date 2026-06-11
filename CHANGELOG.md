@@ -7,6 +7,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- rustler 0.37 → 0.38 (Rust crate and optional Hex package). Additive
+  upstream release; no NIF API changes needed. The vendored whisper.cpp
+  stays at 1.8.3 until whisper-rs ships a release vendoring something
+  newer - upstream's latest (0.16.0, 2026-03-12) predates whisper.cpp
+  1.8.4.
 - `language: nil` now actually auto-detects on multilingual models, as the
   docs always claimed. Previously `nil` silently fell through to
   whisper.cpp's forced-`"en"` default, decoding non-English audio as
