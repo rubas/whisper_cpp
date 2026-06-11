@@ -1,6 +1,6 @@
 use crate::whisper_grammar::WhisperGrammarElement;
 use crate::whisper_vad::WhisperVadParams;
-use std::ffi::{c_char, c_float, c_int, CString};
+use std::ffi::{c_float, c_int, CString};
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::fmt::Result as FmtResult;
@@ -50,6 +50,9 @@ pub struct FullParams<'a, 'b> {
     progress_callback_safe: Option<Arc<Box<dyn FnMut(i32)>>>,
     abort_callback_safe: Option<Arc<Box<dyn FnMut() -> bool>>>,
     segment_calllback_safe: Option<Arc<SegmentCallbackFn>>,
+    language_cstr: Option<Arc<CString>>,
+    initial_prompt_cstr: Option<Arc<CString>>,
+    vad_model_path_cstr: Option<Arc<CString>>,
 }
 
 impl<'a, 'b> FullParams<'a, 'b> {
@@ -88,6 +91,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
             phantom_lang: PhantomData,
             phantom_tokens: PhantomData,
             grammar: None,
+            language_cstr: None,
+            initial_prompt_cstr: None,
+            vad_model_path_cstr: None,
             progress_callback_safe: None,
             abort_callback_safe: None,
             segment_calllback_safe: None,
@@ -287,12 +293,19 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to "en".
     pub fn set_language(&mut self, language: Option<&'a str>) {
-        self.fp.language = match language {
-            Some(language) => CString::new(language)
-                .expect("Language contains null byte")
-                .into_raw() as *const _,
-            None => std::ptr::null(),
-        };
+        // Owned by the struct (previously leaked via `into_raw`); the
+        // last clone of `FullParams` to drop frees it.
+        match language {
+            Some(language) => {
+                let cstr = Arc::new(CString::new(language).expect("Language contains null byte"));
+                self.fp.language = cstr.as_ptr();
+                self.language_cstr = Some(cstr);
+            }
+            None => {
+                self.fp.language = std::ptr::null();
+                self.language_cstr = None;
+            }
+        }
     }
 
     /// Set `detect_language`.
@@ -814,9 +827,12 @@ impl<'a, 'b> FullParams<'a, 'b> {
     /// // ... further usage of params ...
     /// ```
     pub fn set_initial_prompt(&mut self, initial_prompt: &str) {
-        self.fp.initial_prompt = CString::new(initial_prompt)
-            .expect("Initial prompt contains null byte")
-            .into_raw() as *const c_char;
+        // Owned by the struct (previously leaked via `into_raw`); the
+        // last clone of `FullParams` to drop frees it.
+        let cstr =
+            Arc::new(CString::new(initial_prompt).expect("Initial prompt contains null byte"));
+        self.fp.initial_prompt = cstr.as_ptr();
+        self.initial_prompt_cstr = Some(cstr);
     }
 
     /// Enable or disable VAD.
@@ -837,9 +853,12 @@ impl<'a, 'b> FullParams<'a, 'b> {
     /// This method will panic if `vad_model_path` contains a null byte.
     pub fn set_vad_model_path(&mut self, vad_model_path: Option<&str>) {
         self.fp.vad_model_path = if let Some(vad_model_path) = vad_model_path {
-            CString::new(vad_model_path)
-                .expect("VAD model path contains null byte")
-                .into_raw() as *const c_char
+            // Owned by the struct (previously leaked via `into_raw`).
+            let cstr =
+                Arc::new(CString::new(vad_model_path).expect("VAD model path contains null byte"));
+            let ptr = cstr.as_ptr();
+            self.vad_model_path_cstr = Some(cstr);
+            ptr
         } else {
             self.fp.vad = false;
 
