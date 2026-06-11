@@ -277,6 +277,19 @@ pub(crate) fn transcribe_one(
         None => (samples, None),
     };
 
+    // whisper.cpp polls the abort callback only inside `full()`; honour
+    // a flag raised during the VAD pass before paying for the encoder.
+    if abort_flag
+        .as_ref()
+        .is_some_and(|f| f.load(Ordering::SeqCst))
+    {
+        return Ok(TranscriptionResult {
+            language: language.unwrap_or_default(),
+            duration_s,
+            segments: Vec::new(),
+        });
+    }
+
     let mut state: WhisperState = {
         let ctx_guard = model.ctx.lock();
         ctx_guard

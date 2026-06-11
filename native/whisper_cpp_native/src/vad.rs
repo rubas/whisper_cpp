@@ -82,11 +82,14 @@ pub(crate) fn filter_speech(
         return Ok(VadOutcome::NoSpeech);
     }
 
+    // A fresh context per call: loading the ~1 MB silero model costs
+    // about a millisecond (measured), while sharing one context behind
+    // a lock would serialise detection - which scales linearly with
+    // audio length - across concurrent transcribes.
     let mut ctx_params = WhisperVadContextParams::new();
     if let Some(t) = req.n_threads {
         ctx_params.set_n_threads(crate::transcribe::u32_to_i32(t));
     }
-
     let mut vad_ctx = WhisperVadContext::new(model_path, ctx_params)
         .map_err(|e| load_error(format!("failed to load VAD model {model_path:?}: {e}")))?;
 

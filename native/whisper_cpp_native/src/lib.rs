@@ -18,6 +18,7 @@ use rustler::{Encoder, Env, LocalPid, NifMap, ResourceArc, Term};
 use whisper_rs::{WhisperContext, WhisperContextParameters};
 
 mod errors;
+mod native_log;
 mod transcribe;
 mod vad;
 
@@ -472,6 +473,7 @@ fn nif_abort_handle_aborted(handle: ResourceArc<AbortHandle>) -> bool {
 }
 
 fn on_load(env: Env<'_>, _info: Term<'_>) -> bool {
+    native_log::install();
     env.register::<WhisperResource>().is_ok() && env.register::<AbortHandle>().is_ok()
 }
 

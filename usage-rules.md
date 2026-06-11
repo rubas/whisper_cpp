@@ -82,6 +82,13 @@ consistent set of conventions.
 - Match `%WhisperCpp.Error{}` (or its `:reason` field) rather than
   inspecting message strings.
 
+## Logging
+
+- Native whisper.cpp/GGML logs are filtered to warnings and errors.
+  Set `WHISPER_CPP_NATIVE_LOG` to `none`, `error`, `warn` (default),
+  `info`, or `debug` before the NIF loads to change that - `info`
+  restores the classic full model-load output for diagnosis.
+
 ## Performance
 
 - `:n_threads` defaults to 4. On dedicated nodes, set it to the number
