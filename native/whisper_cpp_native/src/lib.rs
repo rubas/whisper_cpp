@@ -19,6 +19,7 @@ use whisper_rs::{WhisperContext, WhisperContextParameters};
 
 mod errors;
 mod transcribe;
+mod vad;
 
 use errors::kind_from_chain;
 use transcribe::{SegmentResult, TranscribeRequest, TranscriptionResult, WordResult};
@@ -105,7 +106,17 @@ impl rustler::Resource for WhisperResource {}
 impl Drop for WhisperResource {
     fn drop(&mut self) {
         if let Some(ctx) = self.ctx.get_mut().take() {
-            std::thread::spawn(move || drop(ctx));
+            // `thread::spawn` panics when the OS refuses a thread, and
+            // a panic inside a resource destructor aborts the whole VM:
+            // fall back to freeing inline (slow, but safe).
+            if let Err(e) = std::thread::Builder::new()
+                .name("whisper-ctx-reaper".to_owned())
+                .spawn(move || drop(ctx))
+            {
+                eprintln!(
+                    "whisper_cpp: freeing the model on the scheduler thread (spawn failed: {e})"
+                );
+            }
         }
     }
 }
@@ -142,6 +153,11 @@ struct TranscribeOpts {
     suppress_non_speech_tokens: Option<bool>,
     single_segment: Option<bool>,
     print_progress: Option<bool>,
+    vad_model_path: Option<String>,
+    vad_threshold: Option<f32>,
+    vad_min_speech_ms: Option<u32>,
+    vad_min_silence_ms: Option<u32>,
+    vad_speech_pad_ms: Option<u32>,
 }
 
 #[derive(NifMap)]
@@ -352,6 +368,16 @@ fn decode_pcm_f32(bytes: &[u8]) -> Result<Vec<f32>, NativeError> {
         .with_detail("byte_length", bytes.len().to_string()));
     }
 
+    // whisper.cpp takes sample counts as i32; larger buffers would
+    // silently truncate at the FFI boundary.
+    if bytes.len() / 4 > i32::MAX as usize {
+        return Err(NativeError::new(
+            "invalid_request",
+            "samples binary exceeds the supported length (i32::MAX samples, about 37 hours)",
+        )
+        .with_detail("samples", (bytes.len() / 4).to_string()));
+    }
+
     let mut samples = Vec::with_capacity(bytes.len() / 4);
     for (index, chunk) in bytes.chunks_exact(4).enumerate() {
         let value = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
@@ -387,6 +413,11 @@ fn build_request(opts: TranscribeOpts) -> TranscribeRequest {
         suppress_non_speech_tokens: opts.suppress_non_speech_tokens,
         single_segment: opts.single_segment,
         print_progress: opts.print_progress.unwrap_or(false),
+        vad_model_path: opts.vad_model_path,
+        vad_threshold: opts.vad_threshold,
+        vad_min_speech_ms: opts.vad_min_speech_ms,
+        vad_min_silence_ms: opts.vad_min_silence_ms,
+        vad_speech_pad_ms: opts.vad_speech_pad_ms,
     }
 }
 
@@ -409,7 +440,7 @@ fn nif_transcribe<'a>(
         let samples = decode_pcm_f32(bytes)?;
         let request = build_request(opts);
         let transcription =
-            transcribe::transcribe_one(&model, &samples, &request, abort_flag, progress_pid)?;
+            transcribe::transcribe_one(&model, samples, &request, abort_flag, progress_pid)?;
         Ok(NifTranscription::from(transcription))
     });
 

@@ -124,6 +124,50 @@ defmodule WhisperCppTest do
     end
   end
 
+  describe "transcribe/3 VAD option validation" do
+    setup do
+      {:ok,
+       model: %WhisperCpp.Model{
+         ref: make_ref(),
+         path: "fake",
+         sampling_rate: 16_000,
+         multilingual: false,
+         n_vocab: 51_864,
+         device: :cpu
+       },
+       pcm: {:pcm_f32, <<0.0::little-float-32>>}}
+    end
+
+    test "rejects out-of-range vad_threshold", %{model: model, pcm: pcm} do
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.transcribe(model, pcm, vad_model_path: "m.bin", vad_threshold: 1.5)
+
+      assert msg =~ "vad_threshold"
+    end
+
+    test "rejects non-positive vad_min_speech_ms", %{model: model, pcm: pcm} do
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe(model, pcm, vad_model_path: "m.bin", vad_min_speech_ms: 0)
+    end
+
+    test "rejects non-string vad_model_path", %{model: model, pcm: pcm} do
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe(model, pcm, vad_model_path: 123)
+    end
+
+    test "rejects vad tuning without a vad model", %{model: model, pcm: pcm} do
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.transcribe(model, pcm, vad_threshold: 0.7)
+
+      assert msg =~ "no effect without :vad_model_path"
+    end
+
+    test "rejects duration_ms of zero", %{model: model, pcm: pcm} do
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe(model, pcm, duration_ms: 0)
+    end
+  end
+
   describe "transcribe_slice/4" do
     setup do
       {:ok,

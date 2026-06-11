@@ -38,9 +38,15 @@ normalised to `[-1.0, 1.0]`. The library does **not** decode WAV/MP3/etc;
 decode upstream. `transcribe_slice/4` runs a `[start_s, end_s)` window of a
 master PCM buffer and shifts the returned times back into the source timeline.
 
+Built-in silero voice activity detection strips silence before the encoder:
+pass `vad_model_path:` (a ~0.9 MB GGML model from
+[ggml-org/whisper-vad](https://huggingface.co/ggml-org/whisper-vad)) and
+timestamps stay on the original timeline.
+
 See [the docs](https://hexdocs.pm/whisper_cpp) for the full option list
 (`:translate`, `:initial_prompt`, `:word_timestamps`, `:beam_size`,
-`:n_threads`, cancellation, progress messages, ...) and error handling.
+`:n_threads`, VAD tuning, cancellation, progress messages, ...) and error
+handling.
 
 ## Backends
 

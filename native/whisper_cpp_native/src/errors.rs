@@ -5,6 +5,7 @@ use anyhow::Context as _;
 
 const KIND_INFERENCE_ERROR: &str = "inference_error";
 const KIND_INVALID_REQUEST: &str = "invalid_request";
+const KIND_LOAD_ERROR: &str = "load_error";
 
 #[derive(Debug, Clone, Copy)]
 struct Kind(&'static str);
@@ -29,6 +30,13 @@ where
     E: std::fmt::Display + Send + Sync + 'static,
 {
     anyhow::anyhow!("{err}").context(Kind(KIND_INVALID_REQUEST))
+}
+
+pub(crate) fn load_error<E>(err: E) -> anyhow::Error
+where
+    E: std::fmt::Display + Send + Sync + 'static,
+{
+    anyhow::anyhow!("{err}").context(Kind(KIND_LOAD_ERROR))
 }
 
 // `anyhow::Error::downcast_ref` reaches context values; iterating

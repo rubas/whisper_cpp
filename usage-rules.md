@@ -45,6 +45,17 @@ consistent set of conventions.
   pads short inputs and hallucinates into the padding; do not pass
   unfiltered VAD output.
 
+## Voice activity detection
+
+- Pass `:vad_model_path` (a silero GGML model, ~0.9 MB, from
+  `huggingface.co/ggml-org/whisper-vad`) to let whisper.cpp strip
+  silence before the encoder; timestamps are remapped to the original
+  timeline. Tune with `:vad_threshold`, `:vad_min_speech_ms`,
+  `:vad_min_silence_ms`, and `:vad_speech_pad_ms`.
+- Audio with no detected speech returns
+  `{:ok, %Transcription{text: "", segments: []}}` - treat empty
+  segments as "no speech", not as an error.
+
 ## Cancellation and progress
 
 - For cancellable transcribes, mint a `%WhisperCpp.AbortHandle{}` via
