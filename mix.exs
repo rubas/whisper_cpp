@@ -31,7 +31,7 @@ defmodule WhisperCpp.MixProject do
   defp docs do
     [
       main: "readme",
-      extras: ["README.md", "CHANGELOG.md", "usage-rules.md"],
+      extras: ["README.md", "CHANGELOG.md"],
       source_url: @source_url,
       source_ref: "v#{@version}",
       homepage_url: @source_url,
@@ -71,8 +71,7 @@ defmodule WhisperCpp.MixProject do
            mix.exs
            README.md
            CHANGELOG.md
-           LICENSE*
-           usage-rules.md)
+           LICENSE*)
     ]
   end
 
