@@ -81,11 +81,11 @@ defmodule WhisperCpp.MixProject do
     [
       {:rustler_precompiled, "~> 0.9.0"},
       {:rustler, "~> 0.38.0", optional: true},
-      {:credo, "~> 1.7.18", only: [:dev, :test], runtime: false},
+      {:credo, "~> 1.7.19", only: [:dev, :test], runtime: false},
       {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false},
       {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false},
       {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
-      {:ex_doc, "~> 0.40.2", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.40.3", only: :dev, runtime: false}
     ]
   end
 end
