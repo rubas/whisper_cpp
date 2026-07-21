@@ -18,7 +18,7 @@ whisper-rs = { version = "0.16.0", default-features = false }
 # resolved from the same vendor branch as whisper-rs.
 whisper-rs-sys = "0.15.0"
 parking_lot = "0.12.5"
-anyhow = "1.0.102"
+anyhow = "1.0.104"
 
 [features]
 # Pick exactly one acceleration backend per build via WHISPER_CPP_FEATURES.
