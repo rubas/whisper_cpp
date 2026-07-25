@@ -1,104 +1,89 @@
 # AGENTS.md
 
-Guidance for AI agents working on `whisper_cpp`.
+## Goal
 
-## What this library is
+Elixir bindings for whisper.cpp. A Rustler NIF links whisper.cpp through the
+`whisper-rs` crate; the Elixir side adds typed options, validation, and PCM
+slicing. The Hex package ships precompiled NIF artefacts, so most users never
+build Rust.
 
-Elixir bindings for whisper.cpp over a Rustler NIF. The Rust side
-links whisper.cpp through the `whisper-rs` crate; the Elixir side
-wraps it with a typed, validated API plus PCM slicing helpers. Audio
-file decoding is intentionally **out of scope** - the library accepts
-only `{:pcm_f32, binary}` (little-endian f32 mono at 16 kHz). Callers
-decode upstream (ffmpeg, bumblebee, ...) so multi-stage pipelines share
-one decoded PCM buffer.
+Audio decoding stays out of the library. `transcribe/3` takes
+`{:pcm_f32, binary}` only (little-endian f32, mono, 16 kHz); a file path or a
+bare binary returns `:invalid_request`. Callers decode upstream (ffmpeg,
+bumblebee) and share one decoded buffer across a pipeline.
 
-## Source-of-truth files
+## Gates
 
-- `lib/whisper_cpp.ex` - public API (`load_model`, `transcribe`,
-  `transcribe_slice`, `available_devices`).
-- `lib/whisper_cpp/native.ex` - Rustler NIF stubs and
-  `rustler_precompiled` targets / variants.
-- `native/whisper_cpp_native/Cargo.toml` - cargo feature matrix
-  (`cuda`, `hipblas`, `vulkan`, `metal`, `coreml`, `openblas`).
-- `native/whisper_cpp_native/src/lib.rs` - NIF entry points; every
-  function returns `{:ok, _}` or `{:error, %{type, message, details}}`.
-- `native/whisper_cpp_native/src/transcribe.rs` - per-call decoding
-  glue around `whisper-rs`.
+`task check` is the gate: format check, compile, credo, Elixir tests, Rust
+tests, zizmor. `ci.yml` runs the same target on pushes to `main` and on pull
+requests, so a push to a branch with no open pull request runs nothing.
+`task --list` shows the rest.
 
-## Public API shape
+- `task test:integration` downloads `ggml-tiny.en` (~75 MB) and runs real
+  inference. `integration.yml` runs it weekly and on manual dispatch, never per
+  pull request. Run it locally when you touch the NIF boundary.
+- `security.yml` audits Hex and cargo dependencies nightly and files an issue on
+  a finding.
+- `release.yml` builds the six-entry NIF matrix. One backend already takes
+  minutes to build from source, so leave the matrix to CI.
 
-```
-WhisperCpp.load_model(path, opts) -> {:ok, Model.t()} | {:error, Error.t()}
-WhisperCpp.transcribe(Model.t(), audio, opts) -> {:ok, Transcription.t()} | {:error, _}
-WhisperCpp.transcribe_slice(Model.t(), pcm_binary, {start_s, end_s}, opts) -> {:ok, Transcription.t()} | {:error, _}
-WhisperCpp.available_devices() -> {:ok, %{backends, gpu_supported}} | {:error, _}
-```
+## Layout
 
-Audio is `{:pcm_f32, binary}` - little-endian f32 mono at 16 kHz.
-Anything else (file paths, bare binaries) is rejected with
-`:invalid_request`. Callers decode upstream.
+- `lib/whisper_cpp/native.ex` holds the NIF stubs plus the
+  `rustler_precompiled` targets, variants, and `nif_versions`.
+- `native/whisper_cpp_native/src/lib.rs` holds the NIF entry points and
+  resources; `transcribe.rs`, `vad.rs`, `errors.rs`, and `native_log.rs` hold
+  the rest.
+- `checksum-Elixir.WhisperCpp.Native.exs` is tracked on purpose, see Release.
 
-## Backends
+## House decisions
 
-Pick **one** accelerator per build via `WHISPER_CPP_FEATURES`. CPU is
-always available. The `rustler_precompiled` variants map to GPU
-backends so users select them at install time via `WHISPER_CPP_VARIANT`.
+- `whisper-rs` and `whisper-rs-sys` resolve through a `[patch.crates-io]` pin to
+  a vendor branch of this repo, not from crates.io. That branch adds the
+  callback and CString-leak fixes and moves the whisper.cpp submodule to v1.8.6.
+  A `whisper-rs` version bump means re-checking the patch, see issue #26.
+- One accelerator per build. `WHISPER_CPP_FEATURES` picks the cargo feature and
+  `WHISPER_CPP_BUILD=1` forces a source build. Precompiled variants exist only
+  for `cuda` (x86_64 and aarch64 Linux) and `hipblas` (x86_64 Linux); users
+  select one with `WHISPER_CPP_VARIANT`. The darwin artefact is built with
+  `metal`. The other features in `Cargo.toml` (`vulkan`, `coreml`,
+  `intel-sycl`, `openblas`, `openmp`) are source build only.
+- Errors cross the boundary as `{:error, %{type, message, details}}`.
+  `errors.rs` sets the type and `WhisperCpp.Error` maps it to a reason atom; an
+  unrecognised type becomes `:native_error`. A new type needs both sides.
+- No silent fallback. An unknown option, a device the artefact does not carry,
+  and an audio shape the library rejects all return an error, never a default.
+- Credo runs `--strict` with the ExSlop and ExDNA checks. `Readability.Specs` is
+  on, so a public function without a `@spec` fails the gate.
+  `Readability.ModuleDoc` is off, so a `@moduledoc` on every public module is a
+  house rule that no check catches. Write it anyway.
 
-| Feature      | Selected by                       | SDK requirement at build time   |
-| ------------ | --------------------------------- | ------------------------------- |
-| `cuda`       | `WHISPER_CPP_VARIANT=cuda`        | CUDA toolkit 12+                |
-| `hipblas`    | `WHISPER_CPP_VARIANT=hipblas`     | ROCm 7.x, `hipblas-dev`         |
-| `vulkan`     | source build                      | Vulkan loader / headers         |
-| `metal`      | default on `aarch64-apple-darwin` | Xcode CLT                       |
-| `coreml`     | source build                      | Xcode + Core ML tools           |
-| `intel-sycl` | source build                      | Intel oneAPI Base Toolkit       |
-| `openblas`   | source build                      | `libopenblas-dev`               |
-| `openmp`     | source build                      | `libgomp` / `libomp`            |
+## Pitfalls
 
-## Conventions
+- `release.yml` parses `nif_versions:` out of `lib/whisper_cpp/native.ex` with
+  `sed`. Reformat that line and the release job fails.
+- A new precompiled variant needs an entry in both the `variants` map of
+  `native.ex` and the `release.yml` build matrix, and each miss breaks
+  differently. Without the `native.ex` entry the artefact name keeps no variant
+  suffix, so the install picks the CPU artefact without a warning. Without the
+  matrix entry the suffix is there but no such tarball was published, so the
+  install fails on the download.
+- The ROCm build needs the `GPU_TARGETS` arch list in `release.yml`. Without
+  gfx1200 and gfx1201 the artefact loads and reports the GPU, then dies on the
+  first kernel launch. The release job checks the `.hip_fatbin` size to catch
+  this before publishing.
 
-- Every public function gets a `@spec`. Public modules get a
-  `@moduledoc`. Tests file under `test/whisper_cpp/<module>_test.exs`.
-- Integration tests are tagged `:integration` and excluded by default;
-  they download fixtures on first run.
-- Cross-language errors are categorised on the Rust side via
-  `errors::{invalid_request, load_error, inference_error}` and decoded
-  back to atoms on the Elixir side in `WhisperCpp.Error` (which also
-  knows `:runtime_error`, `:nif_panic`, and `:native_error`).
-- No silent fallbacks: a typo'd audio path returns an error, not garbage
-  PCM. An unknown option returns an error, not a default.
-- Stick to whisper.cpp's published 16 kHz contract; there is no decoder
-  in this library - callers resample and decode upstream.
+## Release
 
-## Local commands
-
-```bash
-task setup           # install elixir deps
-task compile         # compile (builds NIF; first source build is slow)
-task test            # fast unit tests
-task test:integration  # downloads model + audio
-task fmt:check       # mix format + cargo fmt verify
-task lint            # credo --strict + clippy -D warnings
-task check           # full local gate
-```
-
-## Hex publish flow
-
-1. Bump `@version` in `mix.exs` and add a `CHANGELOG.md` entry. Push to
-   `main`.
-2. The `release.yml` workflow detects the version bump, builds NIF
-   tarballs for every target/variant, creates the tag, and uploads the
-   tarballs plus `SHA256SUMS` to the GitHub release.
-3. Locally, regenerate the checksum file from the published assets,
-   then commit and push it:
+1. Bump `@version` in `mix.exs`, add the `CHANGELOG.md` entry, push to `main`.
+2. `release.yml` sees the version change, builds a tarball per target and
+   variant, creates the tag, and uploads the tarballs plus `SHA256SUMS`.
+3. Regenerate the checksum file from the published assets, then commit and push
+   it. The checksum for each tag stays reproducible from the repo:
 
    ```bash
    mix rustler_precompiled.download WhisperCpp.Native --all --no-config --ignore-unavailable --print
-   jj describe -m "chore: update NIF checksum for v$(...)" && jj git push -b main
    ```
 
-   `checksum-Elixir.WhisperCpp.Native.exs` is tracked in git so the
-   checksum that matches each tagged release is reproducible from the
-   repo.
-4. Run `mix hex.publish` from a clean tree. The checksum is included in
-   the Hex tarball via `files: ~w(... checksum-*.exs ...)` in `mix.exs`.
+4. Run `mix hex.publish` from a clean tree. `mix.exs` ships `checksum-*.exs`
+   inside the Hex tarball.
