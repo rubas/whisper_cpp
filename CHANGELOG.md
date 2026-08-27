@@ -4,6 +4,22 @@ All notable changes to `whisper_cpp` will be documented in this file. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-08-27
+
+### Changed
+- Dependency refresh. `libc` 0.2.188 -> 0.2.189 is the only runtime crate in
+  the NIF that moved; the rest are build-only (`cc` 1.3.0 -> 1.4.4,
+  `clang-sys` 1.8.1 -> 1.9.1, `aho-corasick`, `either`, `find-msvc-tools`,
+  `log`, `regex-automata`). No API change. Every direct dependency, Hex and
+  cargo, was already at its latest release; whisper-rs stays at the vendored
+  0.16.0 patch (issue #26).
+- Dev only: ex_slop 0.4.3 -> 0.4.4.
+- `decode_pcm_f32` reads samples through `slice::as_chunks` instead of
+  `chunks_exact`, which drops the manual byte indexing and clears the
+  `clippy::chunks_exact_to_as_chunks` lint on newer toolchains. Same
+  behaviour; the multiple-of-4 guard still rejects a misaligned buffer
+  before any sample is read.
+
 ## [0.4.0] - 2026-06-11
 
 ### Added

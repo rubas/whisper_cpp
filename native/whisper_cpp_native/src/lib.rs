@@ -406,8 +406,10 @@ fn decode_pcm_f32(bytes: &[u8]) -> Result<Vec<f32>, NativeError> {
     }
 
     let mut samples = Vec::with_capacity(bytes.len() / 4);
-    for (index, chunk) in bytes.chunks_exact(4).enumerate() {
-        let value = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+    // The multiple-of-4 guard above rejects any tail, so the remainder is empty.
+    let (chunks, _) = bytes.as_chunks::<4>();
+    for (index, chunk) in chunks.iter().enumerate() {
+        let value = f32::from_le_bytes(*chunk);
         if !value.is_finite() {
             return Err(NativeError::new(
                 "invalid_request",
@@ -536,12 +538,18 @@ mod tests {
 
     #[test]
     fn decode_pcm_f32_rejects_misaligned_length() {
-        let err = decode_pcm_f32(&[1, 2, 3]).unwrap_err();
-        assert_eq!(err.r#type, "invalid_request");
-        assert_eq!(
-            err.details.get("byte_length").map(String::as_str),
-            Some("3")
-        );
+        for (bytes, byte_length) in [
+            (vec![1_u8, 2, 3], "3"),
+            (vec![1_u8, 2, 3, 4, 5], "5"),
+            (vec![1_u8, 2, 3, 4, 5, 6, 7], "7"),
+        ] {
+            let err = decode_pcm_f32(&bytes).unwrap_err();
+            assert_eq!(err.r#type, "invalid_request");
+            assert_eq!(
+                err.details.get("byte_length").map(String::as_str),
+                Some(byte_length)
+            );
+        }
     }
 
     #[test]
