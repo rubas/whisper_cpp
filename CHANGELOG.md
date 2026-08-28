@@ -7,11 +7,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
-- CI: Elixir 1.20.2 -> 1.20.3 and OTP 29.0 -> 29.0.5 across `ci.yml`,
-  `integration.yml`, and `security.yml`, which had drifted to Elixir 1.20.0.
-  `mix.exs` keeps `elixir: "~> 1.19"` as the minimum supported version.
+- CI now uses Elixir 1.20.3 (was 1.20.2) and OTP 29.0.5 (was 29.0). This
+  applies to `ci.yml`, `integration.yml` and `security.yml`. `security.yml`
+  had drifted to Elixir 1.20.0. It also names the versions in its setup-beam
+  install directories. Those move too. `mix.exs` keeps `elixir: "~> 1.19"` as
+  the minimum version.
 
-## [0.4.1] - 2026-08-27
+## [0.4.1] - 2026-08-28
 
 ### Changed
 - Dependency refresh. `libc` 0.2.188 -> 0.2.189 is the only runtime crate in
