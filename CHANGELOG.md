@@ -4,6 +4,13 @@ All notable changes to `whisper_cpp` will be documented in this file. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- CI: Elixir 1.20.2 -> 1.20.3 and OTP 29.0 -> 29.0.5 across `ci.yml`,
+  `integration.yml`, and `security.yml`, which had drifted to Elixir 1.20.0.
+  `mix.exs` keeps `elixir: "~> 1.19"` as the minimum supported version.
+
 ## [0.4.1] - 2026-08-27
 
 ### Changed
