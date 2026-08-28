@@ -18,8 +18,8 @@ concurrency:
 
 env:
   MIX_ENV: test
-  ELIXIR_VERSION: "1.20.2"
-  OTP_VERSION: "29.0"
+  ELIXIR_VERSION: "1.20.3"
+  OTP_VERSION: "29.0.5"
   RUST_TOOLCHAIN: "1.91.0"
 
 jobs:
