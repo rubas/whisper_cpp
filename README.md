@@ -70,6 +70,11 @@ The `cuda` and `hipblas` variants need the same CPU. On an older CPU, build
 from source with `WHISPER_CPP_BUILD=1`. A source build tunes ggml for the CPU
 it runs on.
 
+This baseline applies to releases after 0.4.1. Releases up to 0.4.1 were tuned
+for the CPU of the release runner. Their `aarch64-unknown-linux-gnu` artefacts
+need SVE and i8mm, and the 0.3.1 `x86_64-unknown-linux-gnu` artefact needs
+AVX-512. On a CPU without these, build those versions from source.
+
 To build from source with any whisper-rs backend (`cuda`, `hipblas`, `vulkan`,
 `metal`, `coreml`, `intel-sycl`, `openblas`, `openmp`):
 
