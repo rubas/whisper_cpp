@@ -40,7 +40,7 @@ requests, so a push to a branch with no open pull request runs nothing.
 
 - `whisper-rs` and `whisper-rs-sys` resolve through a `[patch.crates-io]` pin to
   a vendor branch of this repo, not from crates.io. That branch adds the
-  callback and CString-leak fixes and moves the whisper.cpp submodule to v1.8.6.
+  callback and CString-leak fixes and moves the whisper.cpp submodule to v1.9.4.
   A `whisper-rs` version bump means re-checking the patch, see issue #26.
 - One accelerator per build. `WHISPER_CPP_FEATURES` picks the cargo feature and
   `WHISPER_CPP_BUILD=1` forces a source build. Precompiled variants exist only
@@ -60,6 +60,10 @@ requests, so a push to a branch with no open pull request runs nothing.
 
 ## Pitfalls
 
+- `release.yml` builds with `GGML_NATIVE=OFF` and `GGML_CPU_ARM_ARCH` from the
+  matrix. Drop them and ggml builds for the runner CPU, so the artefact can die
+  with SIGILL on an older CPU. The release job fails when the ggml CPU flags
+  contain `native`. Local source builds keep the native tuning.
 - `release.yml` parses `nif_versions:` out of `lib/whisper_cpp/native.ex` with
   `sed`. Reformat that line and the release job fails.
 - A new precompiled variant needs an entry in both the `@variants` map of
@@ -76,8 +80,15 @@ requests, so a push to a branch with no open pull request runs nothing.
 ## Release
 
 1. Bump `@version` in `mix.exs`, add the `CHANGELOG.md` entry, push to `main`.
-2. `release.yml` sees the version change, builds a tarball per target and
-   variant, creates the tag, and uploads the tarballs plus `SHA256SUMS`.
+2. On every push to `main`, `release.yml` releases when no tag exists for the
+   `mix.exs` version. It builds a tarball per target and variant, creates the
+   tag, and uploads the tarballs plus `SHA256SUMS`. A run that is dropped
+   before it creates the tag does not lose the release, because the next push
+   retries it. Once the tag exists, a manual dispatch builds the tag's commit
+   and fails when the tag is missing or its `mix.exs` version differs. The
+   dispatch uploads only the assets the release does not have yet. It never
+   replaces a published tarball, because a new tarball breaks the checksum file
+   in the Hex package.
 3. Regenerate the checksum file from the published assets, then commit and push
    it. The checksum for each tag stays reproducible from the repo:
 
