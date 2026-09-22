@@ -83,7 +83,7 @@ To build from source with any whisper-rs backend (`cuda`, `hipblas`, `vulkan`,
 WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=cuda mix deps.compile whisper_cpp
 ```
 
-Source builds need a Rust toolchain, `cmake`, a C++17 compiler, and the
+Source builds need Rust 1.98 or later, `cmake`, a C++17 compiler, and the
 backend's own SDK (CUDA toolkit, ROCm, Vulkan SDK, ...).
 
 A `coreml` build uses the Core ML encoder whenever the model's
