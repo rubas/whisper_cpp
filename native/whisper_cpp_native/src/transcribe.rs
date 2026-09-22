@@ -557,7 +557,7 @@ fn cs_to_s(cs: i64) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::errors::kind_from_chain;
+    use crate::errors::kind_of;
 
     #[test]
     fn resolve_language_returns_the_iso_code_for_codes_and_full_names() {
@@ -596,14 +596,14 @@ mod tests {
             "de-CH", "gsw", "klingon", "German", " ", "en\0", "\0", "de\0ch",
         ] {
             let err = resolve_language(Some(bad), true).unwrap_err();
-            assert_eq!(kind_from_chain(&err), Some("invalid_request"), "{bad:?}");
+            assert_eq!(kind_of(&err), Some("invalid_request"), "{bad:?}");
         }
     }
 
     #[test]
     fn resolve_language_rejects_non_english_on_english_only_models() {
         let err = resolve_language(Some("de"), false).unwrap_err();
-        assert_eq!(kind_from_chain(&err), Some("invalid_request"));
+        assert_eq!(kind_of(&err), Some("invalid_request"));
     }
 
     fn word_token(bytes: &[u8], t0: i64, t1: i64, p: f32) -> WordToken {

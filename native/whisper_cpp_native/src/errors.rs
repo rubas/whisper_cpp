@@ -29,28 +29,19 @@ fn tagged(kind: &'static str, err: impl std::fmt::Display) -> anyhow::Error {
     })
 }
 
-pub(crate) fn inference_error<E>(err: E) -> anyhow::Error
-where
-    E: std::fmt::Display + Send + Sync + 'static,
-{
+pub(crate) fn inference_error(err: impl std::fmt::Display) -> anyhow::Error {
     tagged(KIND_INFERENCE_ERROR, err)
 }
 
-pub(crate) fn invalid_request<E>(err: E) -> anyhow::Error
-where
-    E: std::fmt::Display + Send + Sync + 'static,
-{
+pub(crate) fn invalid_request(err: impl std::fmt::Display) -> anyhow::Error {
     tagged(KIND_INVALID_REQUEST, err)
 }
 
-pub(crate) fn load_error<E>(err: E) -> anyhow::Error
-where
-    E: std::fmt::Display + Send + Sync + 'static,
-{
+pub(crate) fn load_error(err: impl std::fmt::Display) -> anyhow::Error {
     tagged(KIND_LOAD_ERROR, err)
 }
 
-pub(crate) fn kind_from_chain(err: &anyhow::Error) -> Option<&'static str> {
+pub(crate) fn kind_of(err: &anyhow::Error) -> Option<&'static str> {
     err.downcast_ref::<Tagged>().map(|t| t.kind)
 }
 
@@ -72,19 +63,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn kind_from_chain_finds_the_tag() {
-        assert_eq!(
-            kind_from_chain(&inference_error("boom")),
-            Some("inference_error")
-        );
-        assert_eq!(
-            kind_from_chain(&invalid_request("bad")),
-            Some("invalid_request")
-        );
+    fn kind_of_finds_the_tag() {
+        assert_eq!(kind_of(&inference_error("boom")), Some("inference_error"));
+        assert_eq!(kind_of(&invalid_request("bad")), Some("invalid_request"));
     }
 
     #[test]
-    fn kind_from_chain_is_none_for_untagged_errors() {
-        assert_eq!(kind_from_chain(&anyhow::anyhow!("plain")), None);
+    fn kind_of_is_none_for_untagged_errors() {
+        assert_eq!(kind_of(&anyhow::anyhow!("plain")), None);
     }
 }

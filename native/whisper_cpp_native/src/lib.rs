@@ -22,7 +22,7 @@ mod native_log;
 mod transcribe;
 mod vad;
 
-use errors::kind_from_chain;
+use errors::kind_of;
 use transcribe::{SegmentResult, TranscribeRequest, TranscriptionResult, WordResult};
 
 #[allow(missing_docs)]
@@ -92,7 +92,7 @@ impl NativeError {
 
 impl From<anyhow::Error> for NativeError {
     fn from(err: anyhow::Error) -> Self {
-        let kind = kind_from_chain(&err).unwrap_or("inference_error");
+        let kind = kind_of(&err).unwrap_or("inference_error");
         NativeError::new(kind, format!("{err:#}"))
     }
 }
