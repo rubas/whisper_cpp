@@ -94,6 +94,7 @@ runs:
       with:
         path: |
           test/fixtures/ggml-tiny.en.bin
+          test/fixtures/ggml-tiny.bin
           test/fixtures/jfk.wav
         key: ${{ runner.os }}-fixtures-v1
 

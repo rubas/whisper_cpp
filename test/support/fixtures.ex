@@ -2,9 +2,9 @@ defmodule WhisperCpp.Test.Fixtures do
   @moduledoc """
   Test fixture helpers.
 
-  The integration suite downloads the `ggml-tiny.en` model (~75 MB) on
-  first run and caches it under `test/fixtures/`. Set
-  `WHISPER_CPP_REFRESH=1` to force a re-download.
+  The integration suite downloads the `ggml-tiny.en` and the multilingual
+  `ggml-tiny` model (~75 MB each) on first run and caches them under
+  `test/fixtures/`. Set `WHISPER_CPP_REFRESH=1` to force a re-download.
 
   Audio is shipped as a pre-converted PCM fixture (`jfk.f32le.16k.pcm`
   alongside this file) so tests need neither ffmpeg nor the JFK WAV
@@ -15,6 +15,7 @@ defmodule WhisperCpp.Test.Fixtures do
   require Logger
 
   @model_url "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin"
+  @multilingual_model_url "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
 
   # ~0.85 MB silero VAD model (MIT). v6.2.0 is available at the same base
   # URL when an upgrade is wanted.
@@ -28,6 +29,9 @@ defmodule WhisperCpp.Test.Fixtures do
   @spec model_path() :: Path.t()
   def model_path, do: Path.join(fixtures_dir(), "ggml-tiny.en.bin")
 
+  @spec multilingual_model_path() :: Path.t()
+  def multilingual_model_path, do: Path.join(fixtures_dir(), "ggml-tiny.bin")
+
   @spec pcm_path() :: Path.t()
   def pcm_path do
     Path.join([File.cwd!(), "test", "support", "jfk.f32le.16k.pcm"])
@@ -38,6 +42,9 @@ defmodule WhisperCpp.Test.Fixtures do
 
   @spec ensure_model!() :: Path.t()
   def ensure_model!, do: ensure_file!(model_path(), @model_url)
+
+  @spec ensure_multilingual_model!() :: Path.t()
+  def ensure_multilingual_model!, do: ensure_file!(multilingual_model_path(), @multilingual_model_url)
 
   @spec ensure_vad_model!() :: Path.t()
   def ensure_vad_model!, do: ensure_file!(vad_model_path(), @vad_model_url)

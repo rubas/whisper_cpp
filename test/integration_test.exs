@@ -1,9 +1,9 @@
 defmodule WhisperCpp.IntegrationTest do
   @moduledoc """
-  End-to-end transcription test. Downloads `ggml-tiny.en.bin` (~75 MB)
-  on first run and caches it under `test/fixtures/`; the audio fixture
-  ships pre-converted under `test/support/jfk.f32le.16k.pcm` so no
-  ffmpeg is required.
+  End-to-end transcription test. Downloads `ggml-tiny.en.bin` and the
+  multilingual `ggml-tiny.bin` (~75 MB each) on first run and caches them
+  under `test/fixtures/`; the audio fixture ships pre-converted under
+  `test/support/jfk.f32le.16k.pcm` so no ffmpeg is required.
 
   Tagged `:integration` so it is excluded from `mix test` by default.
   Run with `mix test --include integration`.
@@ -396,6 +396,22 @@ defmodule WhisperCpp.IntegrationTest do
 
     assert {:error, %WhisperCpp.Error{reason: :invalid_request}} =
              WhisperCpp.transcribe(model_ref, {:pcm_f32, ""}, language: "en")
+  end
+
+  test "audio too short for language detection returns an empty transcription on a multilingual model" do
+    {:ok, model_ref} = WhisperCpp.load_model(Fixtures.ensure_multilingual_model!())
+
+    # Up to 40 samples the mel spectrogram has no frame to detect a
+    # language on; 41 samples has one frame.
+    for samples <- [1, 40, 41] do
+      pcm = :binary.copy(<<0.0::little-float-32>>, samples)
+
+      assert {:ok, %WhisperCpp.Transcription{text: "", segments: [], language: ""}} =
+               WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm})
+
+      assert {:ok, %WhisperCpp.Transcription{text: "", segments: [], language: "de"}} =
+               WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm}, language: "german")
+    end
   end
 
   defp collect_progress(acc) do

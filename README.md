@@ -95,7 +95,7 @@ A `coreml` build uses the Core ML encoder whenever the model's
 
 ```bash
 mix test                  # unit tests, no downloads
-mix test --include integration  # downloads ggml-tiny.en + JFK sample, real inference
+mix test --include integration  # downloads ggml-tiny.en + ggml-tiny, real inference
 ```
 
 ## License
