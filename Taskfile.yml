@@ -35,7 +35,7 @@ tasks:
       - mix test --color
 
   test:integration:
-    desc: End-to-end whisper.cpp transcription against the tiny.en model (~75 MB download)
+    desc: End-to-end whisper.cpp transcription against the tiny.en and tiny models (~150 MB download)
     deps: [compile]
     cmds:
       - mix test --include integration --color

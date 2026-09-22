@@ -317,6 +317,14 @@ pub(crate) fn transcribe_one(
         return Ok(TranscriptionResult::empty(language, duration_s));
     }
 
+    // whisper.cpp detects the language before it checks the length. Up to
+    // 40 samples the mel spectrogram has no frame (`n_len_org = 1 +
+    // (n - 200) / 160` is 0), so detection and `full()` fail. With a pinned
+    // language the same audio decodes to nothing; return that result.
+    if language.is_none() && inference_samples.len() <= 40 {
+        return Ok(TranscriptionResult::empty(language, duration_s));
+    }
+
     let mut state: WhisperState = {
         let ctx_guard = model.ctx.lock();
         ctx_guard

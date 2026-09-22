@@ -19,8 +19,8 @@ tests, zizmor. `ci.yml` runs the same target on pushes to `main` and on pull
 requests, so a push to a branch with no open pull request runs nothing.
 `task --list` shows the rest.
 
-- `task test:integration` downloads `ggml-tiny.en` (~75 MB) and runs real
-  inference. `integration.yml` runs it weekly and on manual dispatch, never per
+- `task test:integration` downloads `ggml-tiny.en` and the multilingual
+  `ggml-tiny` (~75 MB each) and runs real inference. `integration.yml` runs it weekly and on manual dispatch, never per
   pull request. Run it locally when you touch the NIF boundary.
 - `security.yml` audits Hex and cargo dependencies nightly and files an issue on
   a finding.

@@ -1,6 +1,6 @@
 name: Integration
 
-# Slow path: downloads ggml-tiny.en (~75 MB) + JFK audio fixture and runs a
+# Slow path: downloads ggml-tiny.en and ggml-tiny (~75 MB each) and runs a
 # real end-to-end whisper.cpp transcription. Not gated on every PR; runs
 # on manual dispatch and a weekly cron so upstream model/audio source rot
 # is noticed within a week.
