@@ -1,49 +1,48 @@
-//! Attaches an error-kind tag to `anyhow::Error` chains so the NIF
-//! entry point can map back to a structured Elixir reason atom.
-
-use anyhow::Context as _;
+//! Tags `anyhow::Error` values with an error kind so the NIF entry point
+//! can map back to a structured Elixir reason atom.
 
 const KIND_INFERENCE_ERROR: &str = "inference_error";
 const KIND_INVALID_REQUEST: &str = "invalid_request";
 const KIND_LOAD_ERROR: &str = "load_error";
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Kind(&'static str);
+/// Root error value that carries the kind next to the message. The kind
+/// stays out of `Display`, so the message that reaches Elixir is only
+/// the caller-facing text.
+#[derive(Debug)]
+struct Tagged {
+    kind: &'static str,
+    message: String,
+}
 
-impl std::fmt::Display for Kind {
+impl std::fmt::Display for Tagged {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "kind={}", self.0)
+        f.write_str(&self.message)
     }
 }
 
-impl std::error::Error for Kind {}
+impl std::error::Error for Tagged {}
 
-pub(crate) fn inference_error<E>(err: E) -> anyhow::Error
-where
-    E: std::fmt::Display + Send + Sync + 'static,
-{
-    anyhow::anyhow!("{err}").context(Kind(KIND_INFERENCE_ERROR))
+fn tagged(kind: &'static str, err: impl std::fmt::Display) -> anyhow::Error {
+    anyhow::Error::new(Tagged {
+        kind,
+        message: err.to_string(),
+    })
 }
 
-pub(crate) fn invalid_request<E>(err: E) -> anyhow::Error
-where
-    E: std::fmt::Display + Send + Sync + 'static,
-{
-    anyhow::anyhow!("{err}").context(Kind(KIND_INVALID_REQUEST))
+pub(crate) fn inference_error(err: impl std::fmt::Display) -> anyhow::Error {
+    tagged(KIND_INFERENCE_ERROR, err)
 }
 
-pub(crate) fn load_error<E>(err: E) -> anyhow::Error
-where
-    E: std::fmt::Display + Send + Sync + 'static,
-{
-    anyhow::anyhow!("{err}").context(Kind(KIND_LOAD_ERROR))
+pub(crate) fn invalid_request(err: impl std::fmt::Display) -> anyhow::Error {
+    tagged(KIND_INVALID_REQUEST, err)
 }
 
-// `anyhow::Error::downcast_ref` reaches context values; iterating
-// `err.chain()` does not - contexts sit inside an opaque `ContextError`
-// wrapper whose chain elements never downcast to `Kind`.
-pub(crate) fn kind_from_chain(err: &anyhow::Error) -> Option<&'static str> {
-    err.downcast_ref::<Kind>().map(|k| k.0)
+pub(crate) fn load_error(err: impl std::fmt::Display) -> anyhow::Error {
+    tagged(KIND_LOAD_ERROR, err)
+}
+
+pub(crate) fn kind_of(err: &anyhow::Error) -> Option<&'static str> {
+    err.downcast_ref::<Tagged>().map(|t| t.kind)
 }
 
 pub(crate) trait ErrorContext<T> {
@@ -55,8 +54,7 @@ where
     E: std::error::Error + Send + Sync + 'static,
 {
     fn inference_error_ctx(self, msg: &'static str) -> anyhow::Result<T> {
-        self.map_err(|e| anyhow::anyhow!("{msg}: {e}"))
-            .context(Kind(KIND_INFERENCE_ERROR))
+        self.map_err(|e| inference_error(format!("{msg}: {e}")))
     }
 }
 
@@ -65,19 +63,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn kind_from_chain_finds_the_tag() {
-        assert_eq!(
-            kind_from_chain(&inference_error("boom")),
-            Some("inference_error")
-        );
-        assert_eq!(
-            kind_from_chain(&invalid_request("bad")),
-            Some("invalid_request")
-        );
+    fn kind_of_finds_the_tag() {
+        assert_eq!(kind_of(&inference_error("boom")), Some("inference_error"));
+        assert_eq!(kind_of(&invalid_request("bad")), Some("invalid_request"));
     }
 
     #[test]
-    fn kind_from_chain_is_none_for_untagged_errors() {
-        assert_eq!(kind_from_chain(&anyhow::anyhow!("plain")), None);
+    fn kind_of_is_none_for_untagged_errors() {
+        assert_eq!(kind_of(&anyhow::anyhow!("plain")), None);
     }
 }

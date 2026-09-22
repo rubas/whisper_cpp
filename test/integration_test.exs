@@ -20,9 +20,9 @@ defmodule WhisperCpp.IntegrationTest do
     {:ok, model_path: Fixtures.ensure_model!(), pcm: Fixtures.pcm!()}
   end
 
-  test "available_devices reports a backend list" do
+  test "available_devices lists cpu unless the build is coreml" do
     assert {:ok, %{backends: backends}} = WhisperCpp.available_devices()
-    assert :cpu in backends
+    assert :cpu in backends or backends == [:coreml]
   end
 
   test "transcribes JFK with the tiny.en model", %{model_path: model, pcm: pcm} do
@@ -90,16 +90,9 @@ defmodule WhisperCpp.IntegrationTest do
     assert received == Enum.dedup(received)
   end
 
-  test "abort_handle is observed by inference", %{model_path: model, pcm: pcm} do
+  test "a pre-armed abort_handle returns an empty transcription", %{model_path: model, pcm: pcm} do
     {:ok, model_ref} = WhisperCpp.load_model(model)
     handle = WhisperCpp.AbortHandle.new()
-
-    # Pre-arm the flag before inference starts so the test does not race
-    # the decode loop on fast CPUs. whisper.cpp polls the abort callback
-    # before the first encoder step, so a pre-armed flag must cancel the
-    # run before any segment is decoded: an inert abort callback (the
-    # whisper-rs 0.16.0 trampoline type confusion) returns the full
-    # transcription here instead.
     WhisperCpp.AbortHandle.abort(handle)
 
     assert {:ok, %WhisperCpp.Transcription{text: "", segments: []}} =
@@ -107,6 +100,32 @@ defmodule WhisperCpp.IntegrationTest do
                language: "en",
                n_threads: 4,
                abort_handle: handle
+             )
+  end
+
+  test "an abort_handle raised during inference cancels it through the abort callback",
+       %{model_path: model, pcm: pcm} do
+    {:ok, model_ref} = WhisperCpp.load_model(model)
+    handle = WhisperCpp.AbortHandle.new()
+
+    # whisper.cpp reports progress 0 before the first encoder pass and
+    # polls the abort callback during and after it. Raising the flag on
+    # that message needs no sleep. A missing or inert abort callback
+    # (the whisper-rs 0.16.0 trampoline type confusion) returns the full
+    # transcription instead.
+    aborter =
+      spawn_link(fn ->
+        receive do
+          {:whisper_progress, _} -> WhisperCpp.AbortHandle.abort(handle)
+        end
+      end)
+
+    assert {:ok, %WhisperCpp.Transcription{text: "", segments: []}} =
+             WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm},
+               language: "en",
+               n_threads: 4,
+               abort_handle: handle,
+               progress_pid: aborter
              )
 
     assert WhisperCpp.AbortHandle.aborted?(handle)
@@ -175,6 +194,18 @@ defmodule WhisperCpp.IntegrationTest do
 
     assert {:ok, %WhisperCpp.Transcription{language: "en"}} =
              WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm}, language: "auto", n_threads: 4)
+
+    # A full language name reports its ISO code, also on a result with no
+    # decoded segment (here: aborted before the first segment).
+    handle = WhisperCpp.AbortHandle.new()
+    WhisperCpp.AbortHandle.abort(handle)
+
+    assert {:ok, %WhisperCpp.Transcription{language: "en", segments: []}} =
+             WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm},
+               language: "english",
+               n_threads: 4,
+               abort_handle: handle
+             )
   end
 
   describe "built-in VAD" do

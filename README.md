@@ -50,9 +50,10 @@ handling.
 
 ## Backends
 
-CPU is always available. Pick one accelerator per build; the precompiled Hex
-package ships CPU plus `cuda` / `hipblas` variants for Linux and Metal on Apple
-Silicon, selected via `WHISPER_CPP_VARIANT`:
+CPU is available in every build except `coreml` (see below). Pick one
+accelerator per build; the precompiled Hex package ships CPU plus `cuda` /
+`hipblas` variants for Linux and Metal on Apple Silicon, selected via
+`WHISPER_CPP_VARIANT`:
 
 ```bash
 WHISPER_CPP_VARIANT=cuda mix deps.compile whisper_cpp
@@ -84,6 +85,11 @@ WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=cuda mix compile
 
 Source builds need a Rust toolchain, `cmake`, a C++17 compiler, and the
 backend's own SDK (CUDA toolkit, ROCm, Vulkan SDK, ...).
+
+A `coreml` build uses the Core ML encoder whenever the model's
+`-encoder.mlmodelc` is present and cannot turn it off per model. It rejects
+`device: :cpu` and `use_gpu: false` with `:invalid_request`; build without
+`coreml` for CPU-only inference.
 
 ## Testing
 
