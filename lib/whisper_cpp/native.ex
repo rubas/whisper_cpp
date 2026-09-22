@@ -16,11 +16,23 @@ defmodule WhisperCpp.Native do
 
   @version Mix.Project.config()[:version]
 
-  @known_variants ~w(cuda hipblas)
+  # Precompiled variants per target; release.yml builds the same matrix.
+  @variants %{
+    "x86_64-unknown-linux-gnu" => [:cuda, :hipblas],
+    "aarch64-unknown-linux-gnu" => [:cuda]
+  }
   @variant BuildEnv.get("WHISPER_CPP_VARIANT")
-  if @variant not in [nil | @known_variants] do
+
+  # rustler_precompiled picks the default artefact when no variant of the
+  # target matches, so check the request against the resolved target.
+  with variant when is_binary(variant) <- @variant,
+       {:ok, "nif-" <> nif_target} <- RustlerPrecompiled.target(),
+       [_nif_version, target] = String.split(nif_target, "-", parts: 2),
+       published = @variants |> Map.get(target, []) |> Enum.map(&Atom.to_string/1),
+       false <- variant in published do
     raise CompileError,
-      description: "unknown WHISPER_CPP_VARIANT #{inspect(@variant)}; expected one of #{inspect(@known_variants)}"
+      description:
+        "WHISPER_CPP_VARIANT #{inspect(variant)} is not published for #{target}; expected one of #{inspect(published)}"
   end
 
   use RustlerPrecompiled,
@@ -37,15 +49,10 @@ defmodule WhisperCpp.Native do
       x86_64-unknown-linux-gnu
       aarch64-unknown-linux-gnu
     ),
-    variants: %{
-      "x86_64-unknown-linux-gnu" => [
-        cuda: fn -> System.get_env("WHISPER_CPP_VARIANT") == "cuda" end,
-        hipblas: fn -> System.get_env("WHISPER_CPP_VARIANT") == "hipblas" end
-      ],
-      "aarch64-unknown-linux-gnu" => [
-        cuda: fn -> System.get_env("WHISPER_CPP_VARIANT") == "cuda" end
-      ]
-    },
+    variants:
+      Map.new(@variants, fn {target, names} ->
+        {target, for(name <- names, do: {name, fn -> Atom.to_string(name) == @variant end})}
+      end),
     features: @cargo_features
 
   @doc "Reports whether whisper.cpp's language table knows the given code or name."
