@@ -95,11 +95,12 @@ defmodule WhisperCpp.IntegrationTest do
     handle = WhisperCpp.AbortHandle.new()
 
     # Pre-arm the flag before inference starts so the test does not race
-    # the decode loop on fast CPUs. whisper.cpp polls the abort callback
-    # before the first encoder step, so a pre-armed flag must cancel the
-    # run before any segment is decoded: an inert abort callback (the
-    # whisper-rs 0.16.0 trampoline type confusion) returns the full
-    # transcription here instead.
+    # the decode loop on fast CPUs. Without VAD the native side does not
+    # short-circuit a raised flag, so the run reaches `full()`. whisper.cpp
+    # polls the abort callback after the first encoder pass, so a
+    # pre-armed flag must cancel the run before any segment is decoded:
+    # a missing or inert abort callback (the whisper-rs 0.16.0 trampoline
+    # type confusion) returns the full transcription here instead.
     WhisperCpp.AbortHandle.abort(handle)
 
     assert {:ok, %WhisperCpp.Transcription{text: "", segments: []}} =

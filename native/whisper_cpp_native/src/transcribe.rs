@@ -298,9 +298,12 @@ pub(crate) fn transcribe_one(
 
     // whisper.cpp polls the abort callback only inside `full()`; honour
     // a flag raised during the VAD pass before paying for the encoder.
-    if abort_flag
-        .as_ref()
-        .is_some_and(|f| f.load(Ordering::SeqCst))
+    // Without VAD a raised flag goes through `full()`, so the abort
+    // callback stays the one path that cancels inference.
+    if vad_ranges.is_some()
+        && abort_flag
+            .as_ref()
+            .is_some_and(|f| f.load(Ordering::SeqCst))
     {
         return Ok(TranscriptionResult {
             language: language.unwrap_or_default(),
