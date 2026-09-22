@@ -287,11 +287,12 @@ fn resolve_device(
     let lowered = requested.map(str::to_ascii_lowercase);
     match (lowered.as_deref(), gpu_backend) {
         (None | Some("auto"), Some(label)) => Ok((true, label)),
-        // whisper.cpp loads the Core ML encoder in every state of a coreml
-        // build and ignores `use_gpu`, so this build cannot run on CPU only.
+        // A coreml build loads the `-encoder.mlmodelc` sidecar in every
+        // state and ignores `use_gpu`, so it cannot honour a CPU request.
         (Some("cpu"), Some("coreml")) => Err(NativeError::new(
             "invalid_request",
-            "a coreml build always runs the encoder through Core ML; \
+            "a coreml build uses the Core ML encoder whenever the model's \
+             -encoder.mlmodelc is present and cannot turn it off per model; \
              build without coreml for CPU-only inference",
         )
         .with_detail("requested", "cpu")

@@ -20,9 +20,9 @@ defmodule WhisperCpp.IntegrationTest do
     {:ok, model_path: Fixtures.ensure_model!(), pcm: Fixtures.pcm!()}
   end
 
-  test "available_devices reports a backend list" do
+  test "available_devices lists cpu unless the build is coreml" do
     assert {:ok, %{backends: backends}} = WhisperCpp.available_devices()
-    assert :cpu in backends
+    assert :cpu in backends or backends == [:coreml]
   end
 
   test "transcribes JFK with the tiny.en model", %{model_path: model, pcm: pcm} do

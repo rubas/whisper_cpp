@@ -86,7 +86,8 @@ WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=cuda mix compile
 Source builds need a Rust toolchain, `cmake`, a C++17 compiler, and the
 backend's own SDK (CUDA toolkit, ROCm, Vulkan SDK, ...).
 
-A `coreml` build always runs the encoder through Core ML. It rejects
+A `coreml` build uses the Core ML encoder whenever the model's
+`-encoder.mlmodelc` is present and cannot turn it off per model. It rejects
 `device: :cpu` and `use_gpu: false` with `:invalid_request`; build without
 `coreml` for CPU-only inference.
 

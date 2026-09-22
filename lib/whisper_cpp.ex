@@ -89,7 +89,7 @@ defmodule WhisperCpp do
   Returns `{:ok, %{backends: [...], gpu_supported: bool}}`. The
   `backends` list reflects compile-time cargo features (e.g.
   `[:cpu, :cuda]` on a `WHISPER_CPP_VARIANT=cuda` build). A `coreml`
-  build lists only `[:coreml]`, because it cannot run on CPU only.
+  build lists only `[:coreml]`, because it rejects `device: :cpu`.
 
   Build a source artefact with GPU support via:
 
@@ -134,8 +134,9 @@ defmodule WhisperCpp do
     backend when the artefact was built with one; otherwise CPU.
     Requesting a backend that was not compiled in returns
     `{:error, %WhisperCpp.Error{reason: :invalid_request}}`. A `coreml`
-    build always runs the encoder through Core ML, so it rejects `:cpu`
-    the same way.
+    build uses the Core ML encoder whenever the model's
+    `-encoder.mlmodelc` is present and cannot turn it off per model, so
+    it rejects `:cpu` the same way.
   - `:use_gpu` - shortcut: `false` forces `device: :cpu`. Default `true`.
   """
   @spec load_model(Path.t(), [load_opt()]) :: {:ok, Model.t()} | {:error, Error.t()}
