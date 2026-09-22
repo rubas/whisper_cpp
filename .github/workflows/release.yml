@@ -25,7 +25,7 @@ jobs:
     name: Resolve release target
     runs-on: ubuntu-24.04
     permissions:
-      contents: read # read mix.exs / git history to resolve the release target
+      contents: read # read mix.exs and the tags to resolve the release target
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-detect
       cancel-in-progress: false
@@ -33,7 +33,6 @@ jobs:
       should_release: ${{ steps.resolve.outputs.should_release }}
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
-      tag_exists: ${{ steps.resolve.outputs.tag_exists }}
       sha: ${{ steps.resolve.outputs.sha }}
       nif_version: ${{ steps.resolve.outputs.nif_version }}
     steps:
@@ -63,20 +62,10 @@ jobs:
               exit 1
             fi
             SHOULD_RELEASE=true
+          elif git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            SHOULD_RELEASE=false
           else
-            PREVIOUS_VERSION="$(git show HEAD^:mix.exs 2>/dev/null | sed -n 's/^  @version "\([^"]*\)"$/\1/p' | head -n1)"
-
-            if [ "$VERSION" = "$PREVIOUS_VERSION" ]; then
-              SHOULD_RELEASE=false
-            else
-              SHOULD_RELEASE=true
-            fi
-          fi
-
-          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-            TAG_EXISTS=true
-          else
-            TAG_EXISTS=false
+            SHOULD_RELEASE=true
           fi
 
           NIF_VERSION="$(sed -n 's/^[[:space:]]*nif_versions:[[:space:]]*\["\([^"]*\)"\].*$/\1/p' \
@@ -89,7 +78,6 @@ jobs:
           echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag_exists=$TAG_EXISTS" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "nif_version=$NIF_VERSION" >> "$GITHUB_OUTPUT"
 
@@ -326,7 +314,7 @@ jobs:
     name: Create release tag
     runs-on: ubuntu-24.04
     needs: detect
-    if: github.event_name == 'push' && needs.detect.outputs.should_release == 'true' && needs.detect.outputs.tag_exists != 'true'
+    if: github.event_name == 'push' && needs.detect.outputs.should_release == 'true'
     permissions:
       contents: write # create and push the release tag
     concurrency:

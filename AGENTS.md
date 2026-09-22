@@ -80,8 +80,13 @@ requests, so a push to a branch with no open pull request runs nothing.
 ## Release
 
 1. Bump `@version` in `mix.exs`, add the `CHANGELOG.md` entry, push to `main`.
-2. `release.yml` sees the version change, builds a tarball per target and
-   variant, creates the tag, and uploads the tarballs plus `SHA256SUMS`.
+2. On every push to `main`, `release.yml` releases when no tag exists for the
+   `mix.exs` version. It builds a tarball per target and variant, creates the
+   tag, and uploads the tarballs plus `SHA256SUMS`. A run that is dropped
+   before it creates the tag does not lose the release, because the next push
+   retries it. Once the tag exists, only a manual dispatch rebuilds it. The
+   dispatch builds the tag's commit and fails when the tag is missing or its
+   `mix.exs` version differs.
 3. Regenerate the checksum file from the published assets, then commit and push
    it. The checksum for each tag stays reproducible from the repo:
 
