@@ -479,6 +479,15 @@ impl WordSplit {
     }
 }
 
+/// Punctuation that OpenAI whisper's `merge_punctuations` appends to the
+/// previous word.
+const APPENDED_PUNCTUATION: &str = "\"'.。,，!！?？:：”)]}、";
+
+/// True when `bytes` is non-empty UTF-8 made only of chars in `set`.
+fn only_chars(bytes: &[u8], set: &str) -> bool {
+    std::str::from_utf8(bytes).is_ok_and(|s| !s.is_empty() && s.chars().all(|c| set.contains(c)))
+}
+
 /// Group decoded tokens into words. Token bytes are accumulated raw and
 /// converted to UTF-8 once per finished word: Whisper's BPE regularly
 /// splits a multibyte character across two tokens, so converting each
@@ -514,10 +523,18 @@ fn assemble_words(tokens: Vec<WordToken>, split: WordSplit) -> Vec<WordResult> {
 
         // A leading space byte cannot be a fragment of a split
         // codepoint: UTF-8 continuation bytes are always 0b10xx_xxxx.
+        // Per-token splitting keeps trailing punctuation and a lone
+        // space on the neighbouring word, as the space rule does.
         let starts_new_word = current.is_none()
             || match split {
                 WordSplit::Space => tok.bytes.first() == Some(&b' '),
-                WordSplit::Codepoint => tok.bytes.first().is_some_and(|b| b & 0xC0 != 0x80),
+                WordSplit::Codepoint => {
+                    tok.bytes.first().is_some_and(|b| b & 0xC0 != 0x80)
+                        && !only_chars(&tok.bytes, APPENDED_PUNCTUATION)
+                        && !current
+                            .as_ref()
+                            .is_some_and(|acc| only_chars(&acc.bytes, " "))
+                }
             };
 
         if starts_new_word {
@@ -663,10 +680,7 @@ mod tests {
             .iter()
             .map(|w| (w.text.as_str(), w.start, w.end))
             .collect();
-        assert_eq!(
-            spans,
-            [("你好", 0.0, 0.4), ("世界", 0.4, 0.9), ("。", 0.9, 1.0)]
-        );
+        assert_eq!(spans, [("你好", 0.0, 0.4), ("世界。", 0.4, 1.0)]);
         assert!((words[1].probability - 0.7).abs() < f32::EPSILON);
     }
 
@@ -691,7 +705,22 @@ mod tests {
         );
 
         let texts: Vec<&str> = words.iter().map(|w| w.text.as_str()).collect();
-        assert_eq!(texts, ["こんにちは", "、", "世界"]);
+        assert_eq!(texts, ["こんにちは、", "世界"]);
+    }
+
+    #[test]
+    fn assemble_words_joins_a_lone_space_token_to_the_next_word() {
+        let words = assemble_words(
+            vec![
+                word_token("你好".as_bytes(), 0, 40, 0.9),
+                word_token(b" ", 40, 45, 0.9),
+                word_token("世界".as_bytes(), 45, 90, 0.8),
+            ],
+            WordSplit::Codepoint,
+        );
+
+        let spans: Vec<(&str, f32)> = words.iter().map(|w| (w.text.as_str(), w.start)).collect();
+        assert_eq!(spans, [("你好", 0.0), ("世界", 0.4)]);
     }
 
     #[test]

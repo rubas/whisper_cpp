@@ -9,7 +9,8 @@ defmodule WhisperCpp.Word do
 
   Scripts without spaces between words (`zh`, `ja`, `th`, `lo`, `my`,
   `yue`) split per token instead, as OpenAI whisper does: each `text` is
-  one or more whole characters, and punctuation is a word of its own.
+  one or more whole characters, and trailing punctuation such as `。` or
+  `、` joins the word before it.
   """
 
   @type t :: %__MODULE__{
