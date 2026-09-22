@@ -22,10 +22,14 @@ defmodule WhisperCpp.Native do
     "aarch64-unknown-linux-gnu" => [:cuda]
   }
   @variant BuildEnv.get("WHISPER_CPP_VARIANT")
+  @force_build BuildEnv.get("WHISPER_CPP_BUILD") in ["1", "true"] or
+                 Application.compile_env(:rustler_precompiled, [:force_build, :whisper_cpp], false)
 
   # rustler_precompiled picks the default artefact when no variant of the
-  # target matches, so check the request against the resolved target.
-  with variant when is_binary(variant) <- @variant,
+  # target matches, so check the request against the resolved target. A
+  # source build ignores variants.
+  with false <- @force_build,
+       variant when is_binary(variant) <- @variant,
        {:ok, "nif-" <> nif_target} <- RustlerPrecompiled.target(),
        [_nif_version, target] = String.split(nif_target, "-", parts: 2),
        published = @variants |> Map.get(target, []) |> Enum.map(&Atom.to_string/1),
@@ -40,9 +44,7 @@ defmodule WhisperCpp.Native do
     crate: "whisper_cpp_native",
     base_url: "https://github.com/rubas/whisper_cpp/releases/download/v#{@version}",
     version: @version,
-    force_build:
-      BuildEnv.get("WHISPER_CPP_BUILD") in ["1", "true"] or
-        Application.compile_env(:rustler_precompiled, [:force_build, :whisper_cpp], false),
+    force_build: @force_build,
     nif_versions: ["2.17"],
     targets: ~w(
       aarch64-apple-darwin
