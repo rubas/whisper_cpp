@@ -278,21 +278,32 @@ fn encode_result<T: Encoder>(env: Env<'_>, result: Result<T, NativeError>) -> Te
     }
 }
 
-fn resolve_device(requested: Option<&str>) -> Result<(bool, &'static str), NativeError> {
+/// Maps the requested device to `(use_gpu, label)` for a build whose GPU
+/// backend is `gpu_backend` (`GPU_BACKEND` at runtime).
+fn resolve_device(
+    requested: Option<&str>,
+    gpu_backend: Option<&'static str>,
+) -> Result<(bool, &'static str), NativeError> {
     let lowered = requested.map(str::to_ascii_lowercase);
-    match lowered.as_deref() {
-        None | Some("auto") => match GPU_BACKEND {
-            Some(label) => Ok((true, label)),
-            None => Ok((false, "cpu")),
-        },
-        Some("cpu") => Ok((false, "cpu")),
-        Some(other) if Some(other) == GPU_BACKEND => Ok((true, GPU_BACKEND.unwrap())),
-        Some(other) => Err(NativeError::new(
+    match (lowered.as_deref(), gpu_backend) {
+        (None | Some("auto"), Some(label)) => Ok((true, label)),
+        // whisper.cpp loads the Core ML encoder in every state of a coreml
+        // build and ignores `use_gpu`, so this build cannot run on CPU only.
+        (Some("cpu"), Some("coreml")) => Err(NativeError::new(
+            "invalid_request",
+            "a coreml build always runs the encoder through Core ML; \
+             build without coreml for CPU-only inference",
+        )
+        .with_detail("requested", "cpu")
+        .with_detail("enabled", "coreml")),
+        (None | Some("auto"), None) | (Some("cpu"), _) => Ok((false, "cpu")),
+        (Some(other), Some(label)) if other == label => Ok((true, label)),
+        (Some(other), _) => Err(NativeError::new(
             "invalid_request",
             "requested device backend is not enabled in this NIF artefact",
         )
         .with_detail("requested", other)
-        .with_detail("enabled", GPU_BACKEND.map_or("cpu", |b| b).to_owned())),
+        .with_detail("enabled", gpu_backend.unwrap_or("cpu"))),
     }
 }
 
@@ -300,7 +311,11 @@ fn resolve_device(requested: Option<&str>) -> Result<(bool, &'static str), Nativ
 #[rustler::nif]
 fn nif_available_devices(env: Env<'_>) -> Term<'_> {
     let result = run_with_panic_protection(|| {
-        let mut backends = vec!["cpu".to_owned()];
+        // A coreml build rejects `device: :cpu`, see `resolve_device`.
+        let mut backends = Vec::new();
+        if GPU_BACKEND != Some("coreml") {
+            backends.push("cpu".to_owned());
+        }
         if let Some(b) = GPU_BACKEND {
             backends.push(b.to_owned());
         }
@@ -325,7 +340,7 @@ fn nif_load_model(env: Env<'_>, path: String, opts: LoadOpts) -> Term<'_> {
             );
         }
 
-        let (use_gpu, device_label) = resolve_device(opts.device.as_deref())?;
+        let (use_gpu, device_label) = resolve_device(opts.device.as_deref(), GPU_BACKEND)?;
 
         let mut ctx_params = WhisperContextParameters::default();
         ctx_params.use_gpu(use_gpu);
@@ -563,30 +578,43 @@ mod tests {
 
     #[test]
     fn resolve_device_auto_falls_back_to_cpu_without_gpu() {
-        if GPU_BACKEND.is_none() {
-            let (use_gpu, label) = resolve_device(None).unwrap();
-            assert!(!use_gpu);
-            assert_eq!(label, "cpu");
+        assert_eq!(resolve_device(None, None).unwrap(), (false, "cpu"));
+        assert_eq!(resolve_device(Some("auto"), None).unwrap(), (false, "cpu"));
+    }
 
-            let (use_gpu, label) = resolve_device(Some("auto")).unwrap();
-            assert!(!use_gpu);
-            assert_eq!(label, "cpu");
+    #[test]
+    fn resolve_device_auto_picks_the_built_in_gpu() {
+        assert_eq!(resolve_device(None, Some("cuda")).unwrap(), (true, "cuda"));
+        assert_eq!(
+            resolve_device(Some("auto"), Some("coreml")).unwrap(),
+            (true, "coreml")
+        );
+    }
+
+    #[test]
+    fn resolve_device_cpu_works_in_every_build_but_coreml() {
+        for gpu_backend in [None, Some("cuda"), Some("hipblas"), Some("metal")] {
+            assert_eq!(
+                resolve_device(Some("cpu"), gpu_backend).unwrap(),
+                (false, "cpu")
+            );
         }
     }
 
     #[test]
-    fn resolve_device_cpu_works_in_any_build() {
-        let (use_gpu, label) = resolve_device(Some("cpu")).unwrap();
-        assert!(!use_gpu);
-        assert_eq!(label, "cpu");
+    fn resolve_device_rejects_cpu_on_a_coreml_build() {
+        let err = resolve_device(Some("cpu"), Some("coreml")).unwrap_err();
+        assert_eq!(err.r#type, "invalid_request");
+        assert_eq!(
+            err.details.get("enabled").map(String::as_str),
+            Some("coreml")
+        );
     }
 
     #[test]
     fn resolve_device_rejects_gpu_when_not_built_in() {
-        if GPU_BACKEND.is_none() {
-            assert!(resolve_device(Some("cuda")).is_err());
-            assert!(resolve_device(Some("hipblas")).is_err());
-        }
+        assert!(resolve_device(Some("cuda"), None).is_err());
+        assert!(resolve_device(Some("hipblas"), Some("cuda")).is_err());
     }
 
     #[test]
