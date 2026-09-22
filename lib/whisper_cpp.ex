@@ -619,6 +619,8 @@ defmodule WhisperCpp do
 
   defp valid_optional_pid?(nil), do: true
   # The NIF sends progress with enif_send, which reaches local pids only.
+  # Known limit: a pid from an earlier incarnation of this node name
+  # passes this check and still raises in the NIF.
   defp valid_optional_pid?(pid) when is_pid(pid), do: node(pid) == node()
   defp valid_optional_pid?(_), do: false
 
