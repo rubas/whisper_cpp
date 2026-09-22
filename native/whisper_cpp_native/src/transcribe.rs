@@ -69,7 +69,8 @@ pub(crate) fn u32_to_i32(n: u32) -> i32 {
 }
 
 /// Resolve the caller's language request against whisper.cpp's language
-/// table and the loaded model. `Ok(None)` means auto-detect.
+/// table and the loaded model to its ISO code (`"german"` becomes
+/// `"de"`). `Ok(None)` means auto-detect.
 ///
 /// English-only checkpoints never auto-detect: whisper.cpp's detection
 /// pass scores language tokens the model was not trained with, so `nil`
@@ -86,19 +87,24 @@ fn resolve_language(requested: Option<&str>, multilingual: bool) -> anyhow::Resu
         Some(lang) => {
             // Check NUL before `get_lang_id`: whisper-rs builds a CString
             // from the value and panics on embedded NUL bytes.
-            if lang.contains('\0') || whisper_rs::get_lang_id(lang).is_none() {
+            let code = if lang.contains('\0') {
+                None
+            } else {
+                whisper_rs::get_lang_id(lang).and_then(whisper_rs::get_lang_str)
+            };
+            let Some(code) = code else {
                 return Err(invalid_request(format!(
                     "unknown language {lang:?}; pass an ISO 639-1 code whisper.cpp \
                      supports (e.g. \"de\"), a full language name (\"german\"), or \"auto\""
                 )));
-            }
-            if !multilingual && lang != "en" && lang != "english" {
+            };
+            if !multilingual && code != "en" {
                 return Err(invalid_request(format!(
                     "model is English-only; language {lang:?} is unavailable \
                      (use \"en\", \"auto\", or omit the option)"
                 )));
             }
-            Ok(Some(lang.to_owned()))
+            Ok(Some(code.to_owned()))
         }
     }
 }
@@ -276,7 +282,7 @@ pub(crate) fn transcribe_one(
     // buffer now instead of holding both through the whole inference.
     let (inference_samples, vad_ranges) = match vad_outcome {
         Some(VadOutcome::NoSpeech) => {
-            // No detection ran; report the requested language or none.
+            // No detection ran; report the resolved request or none.
             return Ok(TranscriptionResult {
                 language: language.unwrap_or_default(),
                 duration_s,
@@ -345,9 +351,10 @@ pub(crate) fn transcribe_one(
         }
     }
 
-    // With no decoded segments there was no detection: echo the request
-    // (or "" when auto-detect found nothing to detect) instead of the
-    // state's lang_id default, which reads as a fabricated "en".
+    // With no decoded segments there was no detection: report the
+    // resolved request (or "" when auto-detect found nothing to detect)
+    // instead of the state's lang_id default, which reads as a
+    // fabricated "en".
     let language = if segments.is_empty() {
         language.unwrap_or_default()
     } else {
@@ -522,19 +529,20 @@ mod tests {
     use crate::errors::kind_from_chain;
 
     #[test]
-    fn resolve_language_accepts_codes_and_full_names() {
-        assert_eq!(
-            resolve_language(Some("de"), true).unwrap(),
-            Some("de".to_owned())
-        );
-        assert_eq!(
-            resolve_language(Some("german"), true).unwrap(),
-            Some("german".to_owned())
-        );
-        assert_eq!(
-            resolve_language(Some("en"), false).unwrap(),
-            Some("en".to_owned())
-        );
+    fn resolve_language_returns_the_iso_code_for_codes_and_full_names() {
+        for (requested, multilingual, code) in [
+            ("de", true, "de"),
+            ("german", true, "de"),
+            ("cantonese", true, "yue"),
+            ("en", false, "en"),
+            ("english", false, "en"),
+        ] {
+            assert_eq!(
+                resolve_language(Some(requested), multilingual).unwrap(),
+                Some(code.to_owned()),
+                "{requested:?}"
+            );
+        }
     }
 
     #[test]
@@ -553,7 +561,9 @@ mod tests {
 
     #[test]
     fn resolve_language_rejects_unknown_codes() {
-        for bad in ["de-CH", "gsw", "klingon", " ", "en\0", "\0", "de\0ch"] {
+        for bad in [
+            "de-CH", "gsw", "klingon", "German", " ", "en\0", "\0", "de\0ch",
+        ] {
             let err = resolve_language(Some(bad), true).unwrap_err();
             assert_eq!(kind_from_chain(&err), Some("invalid_request"), "{bad:?}");
         }

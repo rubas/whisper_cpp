@@ -175,6 +175,18 @@ defmodule WhisperCpp.IntegrationTest do
 
     assert {:ok, %WhisperCpp.Transcription{language: "en"}} =
              WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm}, language: "auto", n_threads: 4)
+
+    # A full language name reports its ISO code, also on a result with no
+    # decoded segment (here: aborted before the first segment).
+    handle = WhisperCpp.AbortHandle.new()
+    WhisperCpp.AbortHandle.abort(handle)
+
+    assert {:ok, %WhisperCpp.Transcription{language: "en", segments: []}} =
+             WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm},
+               language: "english",
+               n_threads: 4,
+               abort_handle: handle
+             )
   end
 
   describe "built-in VAD" do
