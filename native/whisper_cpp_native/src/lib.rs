@@ -93,14 +93,7 @@ impl NativeError {
 impl From<anyhow::Error> for NativeError {
     fn from(err: anyhow::Error) -> Self {
         let kind = kind_from_chain(&err).unwrap_or("inference_error");
-        // The Kind tag is routing metadata; keep it out of the message.
-        let message = err
-            .chain()
-            .filter(|cause| cause.downcast_ref::<errors::Kind>().is_none())
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(": ");
-        NativeError::new(kind, message)
+        NativeError::new(kind, format!("{err:#}"))
     }
 }
 
@@ -602,5 +595,38 @@ mod tests {
         let err = result.unwrap_err();
         assert_eq!(err.r#type, "nif_panic");
         assert_eq!(err.message, "boom");
+    }
+
+    #[test]
+    fn native_error_message_omits_the_kind_tag() {
+        use errors::{ErrorContext as _, inference_error, invalid_request, load_error};
+
+        let state_err = Err::<(), _>(std::io::Error::other("out of memory"))
+            .inference_error_ctx("failed to create whisper state")
+            .unwrap_err();
+        for (err, r#type, message) in [
+            (
+                invalid_request("bad request"),
+                "invalid_request",
+                "bad request",
+            ),
+            (load_error("bad model"), "load_error", "bad model"),
+            (
+                inference_error("bad inference"),
+                "inference_error",
+                "bad inference",
+            ),
+            (
+                state_err,
+                "inference_error",
+                "failed to create whisper state: out of memory",
+            ),
+        ] {
+            let native = NativeError::from(err);
+            assert_eq!(
+                (native.r#type.as_str(), native.message.as_str()),
+                (r#type, message)
+            );
+        }
     }
 }
