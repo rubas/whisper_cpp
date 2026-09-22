@@ -87,7 +87,10 @@ pub(crate) fn u32_to_i32(n: u32) -> i32 {
 /// English-only checkpoints never auto-detect: whisper.cpp's detection
 /// pass scores language tokens the model was not trained with, so `nil`
 /// and `"auto"` resolve to `"en"` and any other language is rejected.
-fn resolve_language(requested: Option<&str>, multilingual: bool) -> anyhow::Result<Option<String>> {
+pub(crate) fn resolve_language(
+    requested: Option<&str>,
+    multilingual: bool,
+) -> anyhow::Result<Option<String>> {
     match requested {
         None | Some("auto") => {
             if multilingual {

@@ -316,8 +316,10 @@ defmodule WhisperCppTest do
             {english_only, nil, "en"},
             {english_only, "auto", "en"},
             {english_only, "en", "en"},
+            {english_only, "english", "en"},
             {multilingual, nil, ""},
-            {multilingual, "auto", ""}
+            {multilingual, "auto", ""},
+            {multilingual, "german", "de"}
           ] do
         assert {:ok, %WhisperCpp.Transcription{language: ^expected}} =
                  WhisperCpp.transcribe_slice(model, buffer, {0.0, 0.1}, language: language)

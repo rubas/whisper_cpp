@@ -331,8 +331,8 @@ defmodule WhisperCpp do
      )}
   end
 
-  # Mirrors the native request checks (`resolve_language` and friends in
-  # transcribe.rs, which stay authoritative for full runs) so semantics
+  # Mirrors the native request checks (`transcribe_one` in transcribe.rs,
+  # which stays authoritative for full runs) so semantics
   # do not depend on slice length: a request the native path rejects
   # must not succeed just because the window is under 0.3 s. Returns the
   # language an empty native result reports.
@@ -345,32 +345,10 @@ defmodule WhisperCpp do
     end
   end
 
-  # nil and "auto" auto-detect on a multilingual model, which reports ""
-  # when nothing was decoded; an English-only model resolves them to "en".
-  defp check_language(language, multilingual) when language in [nil, "auto"],
-    do: {:ok, if(multilingual, do: "", else: "en")}
-
+  # The native resolver, so both paths report the same code.
   defp check_language(language, multilingual) do
-    cond do
-      not Native.known_language?(language) ->
-        {:error,
-         Error.new(
-           :invalid_request,
-           "unknown language #{inspect(language)}; pass an ISO 639-1 code whisper.cpp " <>
-             "supports (e.g. \"de\"), a full language name (\"german\"), or \"auto\""
-         )}
-
-      not multilingual and language not in ["en", "english"] ->
-        {:error,
-         Error.new(
-           :invalid_request,
-           "model is English-only; language #{inspect(language)} is unavailable " <>
-             "(use \"en\", \"auto\", or omit the option)"
-         )}
-
-      true ->
-        {:ok, language}
-    end
+    with {:error, payload} <- Native.resolve_language(language, multilingual),
+         do: {:error, Error.from_native(payload)}
   end
 
   defp check_translate(true, false = _multilingual) do

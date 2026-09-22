@@ -57,9 +57,12 @@ defmodule WhisperCpp.Native do
       end),
     features: @cargo_features
 
-  @doc "Reports whether whisper.cpp's language table knows the given code or name."
-  @spec known_language?(String.t()) :: boolean()
-  def known_language?(lang), do: nif_known_language(lang)
+  @doc """
+  Resolves a requested language the way `transcribe/5` does: the ISO
+  code, or `""` when a multilingual model auto-detects.
+  """
+  @spec resolve_language(String.t() | nil, boolean()) :: {:ok, String.t()} | {:error, map()}
+  def resolve_language(language, multilingual), do: nif_resolve_language(language, multilingual)
 
   @doc "Reports the active runtime backends compiled into this NIF artefact."
   @spec available_devices() :: {:ok, map()} | {:error, map()}
@@ -99,7 +102,7 @@ defmodule WhisperCpp.Native do
   @spec abort_handle_aborted?(reference()) :: boolean()
   def abort_handle_aborted?(handle), do: nif_abort_handle_aborted(handle)
 
-  defp nif_known_language(_lang), do: :erlang.nif_error(:nif_not_loaded)
+  defp nif_resolve_language(_language, _multilingual), do: :erlang.nif_error(:nif_not_loaded)
 
   defp nif_available_devices, do: :erlang.nif_error(:nif_not_loaded)
   defp nif_load_model(_path, _opts), do: :erlang.nif_error(:nif_not_loaded)
