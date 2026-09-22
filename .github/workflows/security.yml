@@ -50,7 +50,7 @@ jobs:
 
       - name: Install cargo-audit
         if: ${{ !cancelled() }}
-        uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        uses: taiki-e/install-action@dfae9bf3d6f6c6f20ef4ebb3486c01a51341ff12 # v2.87.18
         with:
           tool: cargo-audit
 

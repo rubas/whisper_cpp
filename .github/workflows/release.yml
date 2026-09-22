@@ -176,7 +176,7 @@ jobs:
           persist-credentials: false
 
       # pinned toolchain installer keeps the Rust version and cross targets reproducible
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable # zizmor: ignore[superfluous-actions]
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master # zizmor: ignore[superfluous-actions]
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: ${{ matrix.target }}
@@ -354,7 +354,7 @@ jobs:
 
       # one pinned step handles tag targeting, asset upload, and release notes
       - name: Create release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2 # zizmor: ignore[superfluous-actions]
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3 # zizmor: ignore[superfluous-actions]
         with:
           tag_name: ${{ needs.detect.outputs.tag }}
           target_commitish: ${{ needs.detect.outputs.sha }}
