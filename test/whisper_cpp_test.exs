@@ -299,7 +299,7 @@ defmodule WhisperCppTest do
       for bad <- [<<0, 0, 0xC0, 0x7F>>, <<0, 0, 0x80, 0x7F>>, <<0, 0, 0x80, 0xFF>>] do
         buffer = silence <> bad <> silence
 
-        assert {:error, %Error{reason: :invalid_request, message: msg, details: %{sample_index: 1_000}}} =
+        assert {:error, %Error{reason: :invalid_request, message: msg, details: %{"sample_index" => "1000"}}} =
                  WhisperCpp.transcribe_slice(model, buffer, {0.9375, 1.0375})
 
         assert msg =~ "non-finite"

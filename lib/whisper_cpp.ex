@@ -316,8 +316,8 @@ defmodule WhisperCpp do
     end
   end
 
-  # Mirrors `decode_pcm_f32` in lib.rs. A float segment does not match
-  # NaN or infinity, so the last clause catches them.
+  # Mirrors `decode_pcm_f32` in lib.rs, details included. A float segment
+  # does not match NaN or infinity, so the last clause catches them.
   defp check_finite(<<>>, _index), do: :ok
   defp check_finite(<<_::little-float-32, rest::binary>>, index), do: check_finite(rest, index + 1)
 
@@ -327,7 +327,7 @@ defmodule WhisperCpp do
        :invalid_request,
        "samples binary contains a non-finite sample (NaN or infinity); " <>
          "the upstream decoder produced corrupted audio",
-       %{sample_index: index}
+       %{"sample_index" => Integer.to_string(index)}
      )}
   end
 
