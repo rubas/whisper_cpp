@@ -23,7 +23,9 @@ caller say so.
 - `%Transcription{language: ...}` is always the ISO code (#52). A full name
   such as `"german"` now reports `"de"` on an empty result too (no speech,
   abort, no segment, or a `transcribe_slice/4` window under 0.3 s). Compare
-  against the code, not the name.
+  against the code, not the name. On a `transcribe_slice/4` window under
+  0.3 s, `nil` and `"auto"` now report `"en"` on an English-only model and
+  `""` on a multilingual model (was `""` and `"auto"`).
 - `WHISPER_CPP_VARIANT` with a variant that the target does not publish
   fails the compile (#49), for example `hipblas` on aarch64 Linux or any
   variant on macOS. Before, it installed the CPU or Metal artefact without a
@@ -35,7 +37,8 @@ caller say so.
   `mix deps.compile whisper_cpp`.
 - A `coreml` source build rejects `device: :cpu` and `use_gpu: false` with
   `:invalid_request`, and `available_devices/0` does not list `:cpu` there
-  (#50). whisper.cpp always uses the Core ML encoder on that build.
+  (#50). That build uses the Core ML encoder whenever the model's
+  `-encoder.mlmodelc` loads, and a caller cannot turn it off per model.
 - `:word_timestamps` returns one word per token group for Chinese, Japanese,
   Thai, Lao, Burmese, and Cantonese, not one word per segment (#51).
   Trailing punctuation joins the word before it.
@@ -45,8 +48,9 @@ caller say so.
 - `transcribe_slice/4` reports every window past the buffer end as
   "requested window extends past the end of the buffer", with `start_s`,
   `end_s`, and `buffer_duration_s` in the details.
-- `load_model/2` returns "path must be a non-empty UTF-8 string" for a path
-  that is not valid UTF-8 (#54).
+- `load_model/2` reports an empty or blank path as "path must be a
+  non-empty UTF-8 string" (#54). Before, the message was "path must be a
+  non-empty string".
 - Source builds need Rust 1.98 or later (#60). The crate declares
   `rust-version = "1.98"`. Precompiled installs do not change.
 - CI uses Elixir 1.20.4 (fixes CVE-2026-75758), OTP 29.1.1, and Rust 1.98.1.
@@ -80,7 +84,9 @@ caller say so.
   - an integer `:no_speech_thold` or `:logprob_thold` outside the i64 range
     (was `ErlangError`);
   - a `:progress_pid` on another node (was `ArgumentError`). The pid must be
-    local.
+    local;
+  - a model path that is not valid UTF-8 in `load_model/2` (was
+    `ArgumentError`).
 - `transcribe_slice/4` windows under 0.3 s check the same things as longer
   windows (#55). A NaN or infinite sample in the window returns
   `:invalid_request` with the native details, and a window that rounds to
