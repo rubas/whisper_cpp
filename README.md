@@ -58,6 +58,23 @@ Silicon, selected via `WHISPER_CPP_VARIANT`:
 WHISPER_CPP_VARIANT=cuda mix deps.compile whisper_cpp
 ```
 
+The precompiled NIFs need this CPU baseline:
+
+| Target                      | Minimum CPU                                                         |
+| --------------------------- | ------------------------------------------------------------------- |
+| `x86_64-unknown-linux-gnu`  | AVX2, FMA, F16C, BMI2 (Intel Haswell, AMD Zen, or newer)            |
+| `aarch64-unknown-linux-gnu` | ARMv8.2-A with dotprod and fp16 (Neoverse N1, Cortex-A76, or newer) |
+| `aarch64-apple-darwin`      | Apple M1 or newer                                                   |
+
+The `cuda` and `hipblas` variants need the same CPU. On an older CPU, build
+from source with `WHISPER_CPP_BUILD=1`. A source build tunes ggml for the CPU
+it runs on.
+
+This baseline applies to releases after 0.4.1. Releases up to 0.4.1 were tuned
+for the CPU of the release runner. Their `aarch64-unknown-linux-gnu` artefacts
+need SVE and i8mm, and the 0.3.1 `x86_64-unknown-linux-gnu` artefact needs
+AVX-512. On a CPU without these, build those versions from source.
+
 To build from source with any whisper-rs backend (`cuda`, `hipblas`, `vulkan`,
 `metal`, `coreml`, `intel-sycl`, `openblas`, `openmp`):
 

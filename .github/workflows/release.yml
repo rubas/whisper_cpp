@@ -25,7 +25,7 @@ jobs:
     name: Resolve release target
     runs-on: ubuntu-24.04
     permissions:
-      contents: read # read mix.exs / git history to resolve the release target
+      contents: read # read mix.exs and the tags to resolve the release target
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-detect
       cancel-in-progress: false
@@ -33,12 +33,12 @@ jobs:
       should_release: ${{ steps.resolve.outputs.should_release }}
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
-      tag_exists: ${{ steps.resolve.outputs.tag_exists }}
       sha: ${{ steps.resolve.outputs.sha }}
       nif_version: ${{ steps.resolve.outputs.nif_version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -48,34 +48,24 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_TAG: ${{ inputs.tag }}
-          TRIGGER_SHA: ${{ github.sha }}
         run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            TAG="$INPUT_TAG"
-            VERSION="${TAG#v}"
-            SHOULD_RELEASE=true
-          else
-            VERSION="$(sed -n 's/^  @version "\([^"]*\)"$/\1/p' mix.exs | head -n1)"
-            PREVIOUS_VERSION="$(git show HEAD^:mix.exs 2>/dev/null | sed -n 's/^  @version "\([^"]*\)"$/\1/p' | head -n1)"
+          VERSION="$(sed -n 's/^  @version "\([^"]*\)"$/\1/p' mix.exs | head -n1)"
+          if [ -z "$VERSION" ]; then
+            echo "Failed to read current mix.exs version" >&2
+            exit 1
+          fi
+          TAG="v$VERSION"
 
-            if [ -z "$VERSION" ]; then
-              echo "Failed to read current mix.exs version" >&2
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "$TAG" != "$INPUT_TAG" ]; then
+              echo "Tag $INPUT_TAG has @version $VERSION in mix.exs" >&2
               exit 1
             fi
-
-            TAG="v$VERSION"
-
-            if [ "$VERSION" = "$PREVIOUS_VERSION" ]; then
-              SHOULD_RELEASE=false
-            else
-              SHOULD_RELEASE=true
-            fi
-          fi
-
-          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-            TAG_EXISTS=true
+            SHOULD_RELEASE=true
+          elif git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            SHOULD_RELEASE=false
           else
-            TAG_EXISTS=false
+            SHOULD_RELEASE=true
           fi
 
           NIF_VERSION="$(sed -n 's/^[[:space:]]*nif_versions:[[:space:]]*\["\([^"]*\)"\].*$/\1/p' \
@@ -88,8 +78,7 @@ jobs:
           echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag_exists=$TAG_EXISTS" >> "$GITHUB_OUTPUT"
-          echo "sha=$TRIGGER_SHA" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "nif_version=$NIF_VERSION" >> "$GITHUB_OUTPUT"
 
   build:
@@ -142,6 +131,7 @@ jobs:
             target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
             lib_ext: so
+            cpu_arm_arch: armv8.2-a+dotprod+fp16
             features: ""
             install_cuda: false
             install_rocm: false
@@ -152,6 +142,7 @@ jobs:
             target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
             lib_ext: so
+            cpu_arm_arch: armv8.2-a+dotprod+fp16
             features: "cuda"
             install_cuda: true
             install_rocm: false
@@ -238,16 +229,36 @@ jobs:
             ~/.cargo/registry/cache
           key: release-${{ matrix.id }}-${{ hashFiles('native/whisper_cpp_native/Cargo.lock', '.github/workflows/release.yml') }}
 
+      # ggml defaults to GGML_NATIVE=ON and builds for the runner's CPU,
+      # so the artefact can die with SIGILL on an older CPU. With
+      # GGML_NATIVE=OFF, x86_64 gets the ggml baseline (SSE4.2, AVX, AVX2,
+      # FMA, F16C, BMI2, no AVX-512), aarch64 Linux gets cpu_arm_arch, and
+      # darwin gets the clang default (Apple M1). CUDA then builds the ggml
+      # release architecture list instead of the runner GPU. README lists
+      # the baseline per artefact.
       - name: Build NIF
         working-directory: native/whisper_cpp_native
         env:
           FEATURES: ${{ matrix.features }}
           TARGET: ${{ matrix.target }}
+          GGML_NATIVE: "OFF"
+          GGML_CPU_ARM_ARCH: ${{ matrix.cpu_arm_arch }}
         run: |
           if [ -n "$FEATURES" ]; then
             cargo build --release --target "$TARGET" --features "$FEATURES"
           else
             cargo build --release --target "$TARGET"
+          fi
+
+      - name: Verify CPU baseline
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          BUILD_DIR="$(echo native/whisper_cpp_native/target/"${TARGET}"/release/build/whisper-rs-sys-*)"
+          grep -h 'Adding CPU backend variant' "$BUILD_DIR/output"
+          if ! grep -qx 'GGML_NATIVE:BOOL=OFF' "$BUILD_DIR/out/build/CMakeCache.txt"; then
+            echo "::error::ggml built with GGML_NATIVE for the runner CPU; refusing to publish"
+            exit 1
           fi
 
       # Sanity check: a real hipBLAS build with the gfx1100-1201 arch
@@ -303,7 +314,7 @@ jobs:
     name: Create release tag
     runs-on: ubuntu-24.04
     needs: detect
-    if: github.event_name == 'push' && needs.detect.outputs.should_release == 'true' && needs.detect.outputs.tag_exists != 'true'
+    if: github.event_name == 'push' && needs.detect.outputs.should_release == 'true'
     permissions:
       contents: write # create and push the release tag
     concurrency:
@@ -357,7 +368,8 @@ jobs:
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3 # zizmor: ignore[superfluous-actions]
         with:
           tag_name: ${{ needs.detect.outputs.tag }}
-          target_commitish: ${{ needs.detect.outputs.sha }}
+          # a changed tarball breaks the published Hex checksum file
+          overwrite_files: false
           files: |
             artifacts/*.tar.gz
             artifacts/SHA256SUMS

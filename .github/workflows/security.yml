@@ -23,6 +23,7 @@ jobs:
   audit:
     name: Dependency Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read # checkout source
       issues: write # open an issue when the audit fails
