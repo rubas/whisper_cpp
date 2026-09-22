@@ -5,8 +5,6 @@ extern crate semver;
 
 use cmake::Config;
 use std::env;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
 fn main() {
@@ -187,6 +185,7 @@ fn main() {
         .define("WHISPER_ALL_WARNINGS_3RD_PARTY", "OFF")
         .define("WHISPER_BUILD_TESTS", "OFF")
         .define("WHISPER_BUILD_EXAMPLES", "OFF")
+        .define("WHISPER_BUILD_IS_DEV", "OFF")
         .very_verbose(true)
         .pic(true);
 
@@ -380,16 +379,16 @@ fn add_link_search_path(dir: &std::path::Path) -> std::io::Result<()> {
 }
 
 fn get_whisper_cpp_version(whisper_root: &std::path::Path) -> std::io::Result<Option<String>> {
-    let cmake_lists = BufReader::new(File::open(whisper_root.join("CMakeLists.txt"))?);
+    let cmake_lists = std::fs::read_to_string(whisper_root.join("CMakeLists.txt"))?;
+    let component = |name: &str| {
+        let prefix = format!("set(WHISPER_VERSION_{name} ");
+        cmake_lists
+            .lines()
+            .find_map(|line| line.strip_prefix(prefix.as_str())?.strip_suffix(')'))
+    };
 
-    for line in cmake_lists.lines() {
-        let line = line?;
-
-        if let Some(suffix) = line.strip_prefix(r#"project("whisper.cpp" VERSION "#) {
-            let whisper_cpp_version = suffix.trim_end_matches(')');
-            return Ok(Some(whisper_cpp_version.into()));
-        }
-    }
-
-    Ok(None)
+    Ok(component("MAJOR")
+        .zip(component("MINOR"))
+        .zip(component("PATCH"))
+        .map(|((major, minor), patch)| format!("{major}.{minor}.{patch}")))
 }
