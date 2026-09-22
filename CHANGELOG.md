@@ -4,14 +4,96 @@ All notable changes to `whisper_cpp` will be documented in this file. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-09-23
+
+Several changes are caller-visible. Items that need an action from the
+caller say so.
 
 ### Changed
-- CI now uses Elixir 1.20.3 (was 1.20.2) and OTP 29.0.5 (was 29.0). This
-  applies to `ci.yml`, `integration.yml` and `security.yml`. `security.yml`
-  had drifted to Elixir 1.20.0. It also names the versions in its setup-beam
-  install directories. Those move too. `mix.exs` keeps `elixir: "~> 1.19"` as
-  the minimum version.
+- The precompiled NIFs have a fixed CPU baseline (#44). Before, each
+  artefact was tuned for the CPU of the release runner. x86_64 Linux needs
+  AVX2, FMA, F16C, and BMI2. aarch64 Linux needs ARMv8.2-A with dotprod and
+  fp16. Apple Silicon needs an M1 or newer. On an older CPU, build from
+  source with `WHISPER_CPP_BUILD=1`.
+- The `cuda` variants carry kernels for the ggml release GPU list (`sm_50`
+  to `sm_90`), not only `sm_52` PTX. Modern GPUs get faster kernels. The
+  tarballs are larger.
+- Vendored whisper.cpp 1.8.6 -> 1.9.4 (#47), through the same vendor branch
+  of this repo. whisper-rs stays at the patched 0.16.0 (issue #26).
+- `%Transcription{language: ...}` is always the ISO code (#52). A full name
+  such as `"german"` now reports `"de"` on an empty result too (no speech,
+  abort, no segment, or a `transcribe_slice/4` window under 0.3 s). Compare
+  against the code, not the name. On a `transcribe_slice/4` window under
+  0.3 s, `nil` and `"auto"` now report `"en"` on an English-only model and
+  `""` on a multilingual model (was `""` and `"auto"`).
+- `WHISPER_CPP_VARIANT` with a variant that the target does not publish
+  fails the compile (#49), for example `hipblas` on aarch64 Linux or any
+  variant on macOS. Before, it installed the CPU or Metal artefact without a
+  message. Unset the variable or pick a published variant. A source build
+  ignores the variant, as before.
+- A change to `WHISPER_CPP_FEATURES`, `WHISPER_CPP_VARIANT`, or
+  `WHISPER_CPP_BUILD` recompiles the NIF wrapper without `--force` (#46).
+  To switch the backend of a Hex dependency, run
+  `mix deps.compile whisper_cpp`.
+- A `coreml` source build rejects `device: :cpu` and `use_gpu: false` with
+  `:invalid_request`, and `available_devices/0` does not list `:cpu` there
+  (#50). That build uses the Core ML encoder whenever the model's
+  `-encoder.mlmodelc` loads, and a caller cannot turn it off per model.
+- `:word_timestamps` returns one word per token group for Chinese, Japanese,
+  Thai, Lao, Burmese, and Cantonese, not one word per segment (#51).
+  Trailing punctuation joins the word before it.
+- `WhisperCpp.Pcm.slice/4` rounds the end time, not the duration (#53). A
+  window that ends at the buffer end no longer fails with "past the end".
+  The slice can be one sample shorter than `round(duration_s * sample_rate)`.
+- `transcribe_slice/4` reports every window past the buffer end as
+  "requested window extends past the end of the buffer", with `start_s`,
+  `end_s`, and `buffer_duration_s` in the details.
+- `load_model/2` reports an empty or blank path as "path must be a
+  non-empty UTF-8 string" (#54). Before, the message was "path must be a
+  non-empty string".
+- Source builds need Rust 1.98 or later (#60). The crate declares
+  `rust-version = "1.98"`. Precompiled installs do not change.
+- CI uses Elixir 1.20.4 (fixes CVE-2026-75758), OTP 29.1.1, and Rust 1.98.1.
+  `mix.exs` keeps `elixir: "~> 1.19"` as the minimum version.
+- Release CI builds a manual dispatch from the tag commit and never replaces
+  a published tarball (#43). A push to `main` releases when the tag for the
+  `mix.exs` version is missing, so a dropped run no longer loses a release.
+  CI jobs have timeouts (#56).
+- The NIF release profile uses 16 codegen units (was 1) and keeps thin LTO.
+- Cargo refresh of transitive crates. `cfg-if` 1.0.5 and `smallvec` 1.16.1
+  are in the NIF. The rest are build only. Dev only: ex_doc 0.40.3 -> 0.40.4,
+  ex_slop 0.4.4 -> 0.4.5.
+
+### Fixed
+- The aarch64 Linux artefacts of 0.2.0 to 0.4.1 contain SVE and i8mm code
+  and can die with SIGILL on Graviton2, Ampere Altra, Raspberry Pi 5, or
+  Jetson Orin (#44). The 0.5.0 artefacts do not.
+- whisper.cpp 1.9.4 fixes a heap out-of-bounds read when `transcribe/3` gets
+  1 to 200 samples (ggml-org/whisper.cpp#3956), a stack buffer overflow when
+  `load_model/2` reads a malformed model file (ggml-org/whisper.cpp#3957),
+  and a C++ exception during a model load that could escape into the NIF
+  (ggml-org/whisper.cpp#3831).
+- `transcribe/3` on a multilingual model returns an empty transcription
+  (`language: ""`) for 1 to 40 samples when it detects the language (#66).
+  Before, it returned `:inference_error`.
+- Native error messages no longer start with the internal `kind=<reason>: `
+  tag (#48). The 0.4.0 fix for this did not work.
+- These inputs return `:invalid_request` and no longer raise (#53, #54):
+  - a time too large to convert to samples in `Pcm.slice/4` and
+    `transcribe_slice/4` (was `ArithmeticError`);
+  - an integer `:no_speech_thold` or `:logprob_thold` outside the i64 range
+    (was `ErlangError`);
+  - a `:progress_pid` on another node (was `ArgumentError`). The pid must be
+    local;
+  - a model path that is not valid UTF-8 in `load_model/2` (was
+    `ArgumentError`).
+- `transcribe_slice/4` windows under 0.3 s check the same things as longer
+  windows (#55). A NaN or infinite sample in the window returns
+  `:invalid_request` with the native details, and a window that rounds to
+  zero samples returns `:invalid_request`. Before, both returned an empty
+  success.
+- `task build:*` sets the backend variables on its command line, so an
+  exported `WHISPER_CPP_FEATURES` no longer changes the backend of the task.
 
 ## [0.4.1] - 2026-08-28
 
