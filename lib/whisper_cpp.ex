@@ -92,14 +92,14 @@ defmodule WhisperCpp do
 
   Build a source artefact with GPU support via:
 
-      WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=cuda       mix compile  # NVIDIA
-      WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=hipblas    mix compile  # AMD ROCm
-      WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=vulkan     mix compile  # cross-vendor
-      WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=metal      mix compile  # Apple Silicon
-      WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=coreml     mix compile  # Apple ANE
-      WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=intel-sycl mix compile  # Intel Arc/Xe
-      WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=openblas   mix compile  # CPU + OpenBLAS
-      WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=openmp     mix compile  # CPU + OpenMP
+      WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=cuda       mix deps.compile whisper_cpp  # NVIDIA
+      WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=hipblas    mix deps.compile whisper_cpp  # AMD ROCm
+      WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=vulkan     mix deps.compile whisper_cpp  # cross-vendor
+      WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=metal      mix deps.compile whisper_cpp  # Apple Silicon
+      WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=coreml     mix deps.compile whisper_cpp  # Apple ANE
+      WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=intel-sycl mix deps.compile whisper_cpp  # Intel Arc/Xe
+      WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=openblas   mix deps.compile whisper_cpp  # CPU + OpenBLAS
+      WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=openmp     mix deps.compile whisper_cpp  # CPU + OpenMP
 
   Pick one accelerator per build; the backend is baked into the artefact.
   """

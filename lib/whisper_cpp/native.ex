@@ -8,14 +8,16 @@ defmodule WhisperCpp.Native do
   them.
   """
 
-  @cargo_features_env System.get_env("WHISPER_CPP_FEATURES", "")
+  alias WhisperCpp.Native.BuildEnv
+
+  @cargo_features_env BuildEnv.get("WHISPER_CPP_FEATURES") || ""
   @cargo_features_raw Application.compile_env(:whisper_cpp, :cargo_features, @cargo_features_env)
   @cargo_features String.split(@cargo_features_raw, ~r/[,\s]+/, trim: true)
 
   @version Mix.Project.config()[:version]
 
   @known_variants ~w(cuda hipblas)
-  @variant System.get_env("WHISPER_CPP_VARIANT")
+  @variant BuildEnv.get("WHISPER_CPP_VARIANT")
   if @variant not in [nil | @known_variants] do
     raise CompileError,
       description: "unknown WHISPER_CPP_VARIANT #{inspect(@variant)}; expected one of #{inspect(@known_variants)}"
@@ -27,7 +29,7 @@ defmodule WhisperCpp.Native do
     base_url: "https://github.com/rubas/whisper_cpp/releases/download/v#{@version}",
     version: @version,
     force_build:
-      System.get_env("WHISPER_CPP_BUILD") in ["1", "true"] or
+      BuildEnv.get("WHISPER_CPP_BUILD") in ["1", "true"] or
         Application.compile_env(:rustler_precompiled, [:force_build, :whisper_cpp], false),
     nif_versions: ["2.17"],
     targets: ~w(
