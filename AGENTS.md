@@ -84,9 +84,11 @@ requests, so a push to a branch with no open pull request runs nothing.
    `mix.exs` version. It builds a tarball per target and variant, creates the
    tag, and uploads the tarballs plus `SHA256SUMS`. A run that is dropped
    before it creates the tag does not lose the release, because the next push
-   retries it. Once the tag exists, only a manual dispatch rebuilds it. The
-   dispatch builds the tag's commit and fails when the tag is missing or its
-   `mix.exs` version differs.
+   retries it. Once the tag exists, a manual dispatch builds the tag's commit
+   and fails when the tag is missing or its `mix.exs` version differs. The
+   dispatch uploads only the assets the release does not have yet. It never
+   replaces a published tarball, because a new tarball breaks the checksum file
+   in the Hex package.
 3. Regenerate the checksum file from the published assets, then commit and push
    it. The checksum for each tag stays reproducible from the repo:
 
