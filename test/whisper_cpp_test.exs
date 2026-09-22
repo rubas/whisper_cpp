@@ -388,9 +388,9 @@ defmodule WhisperCppTest do
                WhisperCpp.transcribe_slice(m, s, {-1.0, -0.9})
     end
 
-    test "propagates slice-bounds errors from Pcm.slice", %{model: m, samples: s} do
+    test "rejects a window past the buffer end", %{model: m, samples: s} do
       # samples = 5 seconds; ask for [4.5, 7.0) which extends past the
-      # buffer. Verifies the Pcm.slice -> transcribe_slice handoff.
+      # buffer.
       assert {:error, %Error{reason: :invalid_request, message: msg}} =
                WhisperCpp.transcribe_slice(m, s, {4.5, 7.0})
 
@@ -400,6 +400,14 @@ defmodule WhisperCppTest do
     test "rejects an end time too large to convert to samples", %{model: m, samples: s} do
       assert {:error, %Error{reason: :invalid_request}} =
                WhisperCpp.transcribe_slice(m, s, {0.0, 1.0e308})
+
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe_slice(m, s, {0.0, Integer.pow(10, 400)})
+    end
+
+    test "accepts a short window that ends at the buffer end", %{model: m, samples: s} do
+      assert {:ok, %WhisperCpp.Transcription{text: ""}} =
+               WhisperCpp.transcribe_slice(m, s, {4.90003125, 5.0})
     end
   end
 

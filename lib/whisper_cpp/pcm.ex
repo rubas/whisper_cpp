@@ -69,12 +69,15 @@ defmodule WhisperCpp.Pcm do
     total_samples = div(byte_size(samples), @bytes_per_sample)
     buffer_duration_s = total_samples / sample_rate
     # Round, do not truncate: millisecond-precise times otherwise lose
-    # their last sample to float representation error. Clamp before the
-    # multiply, because a huge float overflows it and raises; a clamped
-    # time still lands past the end, so the checks below reject it.
-    start_sample = round(min(start_s, buffer_duration_s) * sample_rate)
-    requested_samples = round(min(duration_s, buffer_duration_s + 1) * sample_rate)
-    end_sample = start_sample + requested_samples
+    # their last sample to float representation error. Round both ends,
+    # not the duration, so a window that ends at the buffer end fits.
+    # Clamp before the arithmetic, because a huge time overflows it and
+    # raises; a clamped time still lands past the end, so the checks
+    # below reject it.
+    clamped_start_s = min(start_s, buffer_duration_s)
+    start_sample = round(clamped_start_s * sample_rate)
+    end_sample = round((clamped_start_s + min(duration_s, buffer_duration_s + 1)) * sample_rate)
+    requested_samples = end_sample - start_sample
 
     cond do
       requested_samples <= 0 ->

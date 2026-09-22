@@ -266,7 +266,7 @@ defmodule WhisperCpp do
       when is_binary(samples) and is_number(start_s) and is_number(end_s) and is_list(opts) do
     with :ok <- validate_options(opts, transcribe_validators()),
          :ok <- validate_vad_options(opts),
-         :ok <- validate_slice_range(start_s, end_s),
+         :ok <- validate_slice_range(start_s, end_s, Pcm.duration_s(samples, sample_rate())),
          {:ok, slice} <- Pcm.slice(samples, sample_rate(), start_s, end_s - start_s) do
       if short_window?(start_s, end_s),
         do: short_slice_result(model, slice, start_s, end_s, opts),
@@ -278,10 +278,12 @@ defmodule WhisperCpp do
     {:error, Error.new(:invalid_request, "expected a %Model{}, an f32 PCM binary, and a {start_s, end_s} tuple")}
   end
 
-  defp validate_slice_range(start_s, _end_s) when start_s < 0,
+  # Compare before `end_s - start_s`: the subtraction raises when a float
+  # meets an integer too large for a float.
+  defp validate_slice_range(start_s, _end_s, _buffer_duration_s) when start_s < 0,
     do: {:error, Error.new(:invalid_request, "start_s must be >= 0", %{start_s: start_s})}
 
-  defp validate_slice_range(start_s, end_s) when end_s <= start_s,
+  defp validate_slice_range(start_s, end_s, _buffer_duration_s) when end_s <= start_s,
     do:
       {:error,
        Error.new(:invalid_request, "end_s must be greater than start_s", %{
@@ -289,7 +291,16 @@ defmodule WhisperCpp do
          end_s: end_s
        })}
 
-  defp validate_slice_range(_start_s, _end_s), do: :ok
+  defp validate_slice_range(start_s, end_s, buffer_duration_s) when end_s > buffer_duration_s,
+    do:
+      {:error,
+       Error.new(:invalid_request, "requested window extends past the end of the buffer", %{
+         start_s: start_s,
+         end_s: end_s,
+         buffer_duration_s: buffer_duration_s
+       })}
+
+  defp validate_slice_range(_start_s, _end_s, _buffer_duration_s), do: :ok
 
   # Strictly-below comparison with an epsilon: a window of exactly the
   # documented 0.3 s minimum must transcribe even when float subtraction
