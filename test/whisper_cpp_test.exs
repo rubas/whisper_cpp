@@ -25,6 +25,13 @@ defmodule WhisperCppTest do
       assert msg =~ "non-empty"
     end
 
+    test "rejects a path that is not valid UTF-8" do
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.load_model(<<0xFF, 0xFE>>)
+
+      assert msg =~ "UTF-8"
+    end
+
     test "rejects unknown options" do
       assert {:error, %Error{reason: :invalid_request, message: msg}} =
                WhisperCpp.load_model("/tmp/whatever.bin", made_up: true)
@@ -164,6 +171,24 @@ defmodule WhisperCppTest do
                WhisperCpp.transcribe(model, pcm, logprob_thold: -1.0e300)
     end
 
+    test "rejects integer thresholds outside i64", %{model: model, pcm: pcm} do
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe(model, pcm, logprob_thold: 9_223_372_036_854_775_808)
+
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe(model, pcm, no_speech_thold: -9_223_372_036_854_775_809)
+    end
+
+    test "rejects a progress pid on another node", %{model: model, pcm: pcm} do
+      node = "other@host"
+      remote_pid = :erlang.binary_to_term(<<131, 88, 119, byte_size(node), node::binary, 1::32, 0::32, 1::32>>)
+
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.transcribe(model, pcm, progress_pid: remote_pid)
+
+      assert msg =~ "progress_pid"
+    end
+
     test "rejects invalid UTF-8 in string options", %{model: model, pcm: pcm} do
       assert {:error, %Error{reason: :invalid_request}} =
                WhisperCpp.transcribe(model, pcm, language: <<0xFF, 0xFE>>)
@@ -268,6 +293,39 @@ defmodule WhisperCppTest do
                WhisperCpp.transcribe_slice(multilingual, buffer, {0.0, 0.1}, language: "de")
     end
 
+    test "rejects non-finite samples inside the short window only", %{model: model} do
+      silence = <<0::size(16_000 * 4)-unit(8)>>
+
+      for bad <- [<<0, 0, 0xC0, 0x7F>>, <<0, 0, 0x80, 0x7F>>, <<0, 0, 0x80, 0xFF>>] do
+        buffer = silence <> bad <> silence
+
+        assert {:error, %Error{reason: :invalid_request, message: msg, details: %{"sample_index" => "1000"}}} =
+                 WhisperCpp.transcribe_slice(model, buffer, {0.9375, 1.0375})
+
+        assert msg =~ "non-finite"
+
+        assert {:ok, %WhisperCpp.Transcription{text: ""}} =
+                 WhisperCpp.transcribe_slice(model, buffer, {0.0, 0.1})
+      end
+    end
+
+    test "reports the language an empty native result reports", %{model: english_only, buffer: buffer} do
+      multilingual = %{english_only | multilingual: true}
+
+      for {model, language, expected} <- [
+            {english_only, nil, "en"},
+            {english_only, "auto", "en"},
+            {english_only, "en", "en"},
+            {english_only, "english", "en"},
+            {multilingual, nil, ""},
+            {multilingual, "auto", ""},
+            {multilingual, "german", "de"}
+          ] do
+        assert {:ok, %WhisperCpp.Transcription{language: ^expected}} =
+                 WhisperCpp.transcribe_slice(model, buffer, {0.0, 0.1}, language: language)
+      end
+    end
+
     test "applies model semantics on the short path", %{model: model, buffer: buffer} do
       # `model` is English-only: requests the native path rejects must
       # not succeed just because the window is short.
@@ -332,13 +390,26 @@ defmodule WhisperCppTest do
                WhisperCpp.transcribe_slice(m, s, {-1.0, -0.9})
     end
 
-    test "propagates slice-bounds errors from Pcm.slice", %{model: m, samples: s} do
+    test "rejects a window past the buffer end", %{model: m, samples: s} do
       # samples = 5 seconds; ask for [4.5, 7.0) which extends past the
-      # buffer. Verifies the Pcm.slice -> transcribe_slice handoff.
+      # buffer.
       assert {:error, %Error{reason: :invalid_request, message: msg}} =
                WhisperCpp.transcribe_slice(m, s, {4.5, 7.0})
 
       assert msg =~ "past the end"
+    end
+
+    test "rejects an end time too large to convert to samples", %{model: m, samples: s} do
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe_slice(m, s, {0.0, 1.0e308})
+
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe_slice(m, s, {0.0, Integer.pow(10, 400)})
+    end
+
+    test "accepts a short window that ends at the buffer end", %{model: m, samples: s} do
+      assert {:ok, %WhisperCpp.Transcription{text: ""}} =
+               WhisperCpp.transcribe_slice(m, s, {4.90003125, 5.0})
     end
   end
 

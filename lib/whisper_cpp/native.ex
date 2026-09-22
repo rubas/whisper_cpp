@@ -8,17 +8,35 @@ defmodule WhisperCpp.Native do
   them.
   """
 
-  @cargo_features_env System.get_env("WHISPER_CPP_FEATURES", "")
+  alias WhisperCpp.Native.BuildEnv
+
+  @cargo_features_env BuildEnv.get("WHISPER_CPP_FEATURES") || ""
   @cargo_features_raw Application.compile_env(:whisper_cpp, :cargo_features, @cargo_features_env)
   @cargo_features String.split(@cargo_features_raw, ~r/[,\s]+/, trim: true)
 
   @version Mix.Project.config()[:version]
 
-  @known_variants ~w(cuda hipblas)
-  @variant System.get_env("WHISPER_CPP_VARIANT")
-  if @variant not in [nil | @known_variants] do
+  # Precompiled variants per target; release.yml builds the same matrix.
+  @variants %{
+    "x86_64-unknown-linux-gnu" => [:cuda, :hipblas],
+    "aarch64-unknown-linux-gnu" => [:cuda]
+  }
+  @variant BuildEnv.get("WHISPER_CPP_VARIANT")
+  @force_build BuildEnv.get("WHISPER_CPP_BUILD") in ["1", "true"] or
+                 Application.compile_env(:rustler_precompiled, [:force_build, :whisper_cpp], false)
+
+  # rustler_precompiled picks the default artefact when no variant of the
+  # target matches, so check the request against the resolved target. A
+  # source build ignores variants.
+  with false <- @force_build,
+       variant when is_binary(variant) <- @variant,
+       {:ok, "nif-" <> nif_target} <- RustlerPrecompiled.target(),
+       [_nif_version, target] = String.split(nif_target, "-", parts: 2),
+       published = @variants |> Map.get(target, []) |> Enum.map(&Atom.to_string/1),
+       false <- variant in published do
     raise CompileError,
-      description: "unknown WHISPER_CPP_VARIANT #{inspect(@variant)}; expected one of #{inspect(@known_variants)}"
+      description:
+        "WHISPER_CPP_VARIANT #{inspect(variant)} is not published for #{target}; expected one of #{inspect(published)}"
   end
 
   use RustlerPrecompiled,
@@ -26,29 +44,25 @@ defmodule WhisperCpp.Native do
     crate: "whisper_cpp_native",
     base_url: "https://github.com/rubas/whisper_cpp/releases/download/v#{@version}",
     version: @version,
-    force_build:
-      System.get_env("WHISPER_CPP_BUILD") in ["1", "true"] or
-        Application.compile_env(:rustler_precompiled, [:force_build, :whisper_cpp], false),
+    force_build: @force_build,
     nif_versions: ["2.17"],
     targets: ~w(
       aarch64-apple-darwin
       x86_64-unknown-linux-gnu
       aarch64-unknown-linux-gnu
     ),
-    variants: %{
-      "x86_64-unknown-linux-gnu" => [
-        cuda: fn -> System.get_env("WHISPER_CPP_VARIANT") == "cuda" end,
-        hipblas: fn -> System.get_env("WHISPER_CPP_VARIANT") == "hipblas" end
-      ],
-      "aarch64-unknown-linux-gnu" => [
-        cuda: fn -> System.get_env("WHISPER_CPP_VARIANT") == "cuda" end
-      ]
-    },
+    variants:
+      Map.new(@variants, fn {target, names} ->
+        {target, for(name <- names, do: {name, fn -> Atom.to_string(name) == @variant end})}
+      end),
     features: @cargo_features
 
-  @doc "Reports whether whisper.cpp's language table knows the given code or name."
-  @spec known_language?(String.t()) :: boolean()
-  def known_language?(lang), do: nif_known_language(lang)
+  @doc """
+  Resolves a requested language the way `transcribe/5` does: the ISO
+  code, or `""` when a multilingual model auto-detects.
+  """
+  @spec resolve_language(String.t() | nil, boolean()) :: {:ok, String.t()} | {:error, map()}
+  def resolve_language(language, multilingual), do: nif_resolve_language(language, multilingual)
 
   @doc "Reports the active runtime backends compiled into this NIF artefact."
   @spec available_devices() :: {:ok, map()} | {:error, map()}
@@ -68,7 +82,7 @@ defmodule WhisperCpp.Native do
   `samples_bin` is a binary of little-endian `f32` mono samples at 16 kHz.
   `abort_handle` is either `nil` or an opaque resource minted by
   `new_abort_handle/0`; signalling it from another process cancels
-  in-flight inference. `progress_pid` is `nil` or a pid that receives
+  in-flight inference. `progress_pid` is `nil` or a local pid that receives
   `{:whisper_progress, percent}` messages as work advances.
   """
   @spec transcribe(reference(), binary(), map(), reference() | nil, pid() | nil) ::
@@ -88,7 +102,7 @@ defmodule WhisperCpp.Native do
   @spec abort_handle_aborted?(reference()) :: boolean()
   def abort_handle_aborted?(handle), do: nif_abort_handle_aborted(handle)
 
-  defp nif_known_language(_lang), do: :erlang.nif_error(:nif_not_loaded)
+  defp nif_resolve_language(_language, _multilingual), do: :erlang.nif_error(:nif_not_loaded)
 
   defp nif_available_devices, do: :erlang.nif_error(:nif_not_loaded)
   defp nif_load_model(_path, _opts), do: :erlang.nif_error(:nif_not_loaded)

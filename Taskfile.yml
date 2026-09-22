@@ -82,74 +82,48 @@ tasks:
 
   build:cpu:
     desc: Source-build NIF with pure CPU backend
-    env:
-      WHISPER_CPP_BUILD: "1"
     cmds:
-      - mix compile
+      - WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES= mix compile
 
   build:cuda:
     desc: Source-build NIF with NVIDIA CUDA backend
-    env:
-      WHISPER_CPP_BUILD: "1"
-      WHISPER_CPP_FEATURES: "cuda"
     cmds:
-      - mix compile
+      - WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=cuda mix compile
 
   build:hipblas:
     desc: Source-build NIF with AMD ROCm / hipBLAS backend
-    env:
-      WHISPER_CPP_BUILD: "1"
-      WHISPER_CPP_FEATURES: "hipblas"
     cmds:
-      - mix compile
+      - WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=hipblas mix compile
 
   build:vulkan:
     desc: Source-build NIF with cross-vendor Vulkan backend
-    env:
-      WHISPER_CPP_BUILD: "1"
-      WHISPER_CPP_FEATURES: "vulkan"
     cmds:
-      - mix compile
+      - WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=vulkan mix compile
 
   build:metal:
     desc: Source-build NIF with Apple Silicon Metal backend
-    env:
-      WHISPER_CPP_BUILD: "1"
-      WHISPER_CPP_FEATURES: "metal"
     cmds:
-      - mix compile
+      - WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=metal mix compile
 
   build:coreml:
     desc: Source-build NIF with Apple Neural Engine (Core ML) backend
-    env:
-      WHISPER_CPP_BUILD: "1"
-      WHISPER_CPP_FEATURES: "coreml"
     cmds:
-      - mix compile
+      - WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=coreml mix compile
 
   build:intel-sycl:
     desc: Source-build NIF with Intel Arc / Xe oneAPI SYCL backend
-    env:
-      WHISPER_CPP_BUILD: "1"
-      WHISPER_CPP_FEATURES: "intel-sycl"
     cmds:
-      - mix compile
+      - WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=intel-sycl mix compile
 
   build:openblas:
     desc: Source-build NIF with OpenBLAS CPU acceleration
-    env:
-      WHISPER_CPP_BUILD: "1"
-      WHISPER_CPP_FEATURES: "openblas"
     cmds:
-      - mix compile
+      - WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=openblas mix compile
 
   build:openmp:
     desc: Source-build NIF with OpenMP CPU multi-threading
-    env:
-      WHISPER_CPP_BUILD: "1"
-      WHISPER_CPP_FEATURES: "openmp"
     cmds:
-      - mix compile
+      - WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=openmp mix compile
 
   test:zizmor:
     desc: Lint GitHub Actions workflows for security issues

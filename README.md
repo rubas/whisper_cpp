@@ -80,7 +80,7 @@ To build from source with any whisper-rs backend (`cuda`, `hipblas`, `vulkan`,
 `metal`, `coreml`, `intel-sycl`, `openblas`, `openmp`):
 
 ```bash
-WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=cuda mix compile
+WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=cuda mix deps.compile whisper_cpp
 ```
 
 Source builds need a Rust toolchain, `cmake`, a C++17 compiler, and the

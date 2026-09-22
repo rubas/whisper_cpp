@@ -485,13 +485,16 @@ fn nif_transcribe<'a>(
     encode_result(env, result)
 }
 
-/// Reports whether whisper.cpp's static language table knows `lang`
-/// (ISO 639-1 code or full name); `"auto"` is always accepted. Needs no
-/// loaded model - the table is compiled into whisper.cpp.
+/// Resolves a requested language the way a transcription does: the ISO
+/// code, or `""` when a multilingual model auto-detects. Needs no loaded
+/// model - the table is compiled into whisper.cpp.
 #[rustler::nif]
 #[allow(clippy::needless_pass_by_value)]
-fn nif_known_language(lang: String) -> bool {
-    lang == "auto" || (!lang.contains('\0') && whisper_rs::get_lang_id(&lang).is_some())
+fn nif_resolve_language(env: Env<'_>, language: Option<String>, multilingual: bool) -> Term<'_> {
+    let result = run_with_panic_protection(|| {
+        Ok(transcribe::resolve_language(language.as_deref(), multilingual)?.unwrap_or_default())
+    });
+    encode_result(env, result)
 }
 
 /// Allocates a fresh cooperative-cancellation flag.

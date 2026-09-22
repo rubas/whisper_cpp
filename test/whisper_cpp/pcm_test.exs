@@ -54,6 +54,20 @@ defmodule WhisperCpp.PcmTest do
       assert {:error, %Error{reason: :invalid_request}} = Pcm.slice(one_second, 16_000, 5.0, 0.1)
     end
 
+    test "rejects times too large to convert to samples" do
+      one_second = samples(1)
+      assert {:error, %Error{reason: :invalid_request}} = Pcm.slice(one_second, 16_000, 1.0e308, 1.0)
+      assert {:error, %Error{reason: :invalid_request}} = Pcm.slice(one_second, 16_000, 0.0, 1.0e308)
+    end
+
+    test "fits a window that ends at the buffer end" do
+      # 0.90003125 s is sample 14_400.5, which rounds up, and so does the
+      # duration; rounding the end instead keeps the window inside.
+      one_second = samples(1)
+      assert {:ok, slice} = Pcm.slice(one_second, 16_000, 0.90003125, 1.0 - 0.90003125)
+      assert byte_size(slice) == 1_599 * 4
+    end
+
     test "rejects bad argument shapes" do
       assert {:error, %Error{reason: :invalid_request}} = Pcm.slice("not-binary", 16_000, 0, 0.1)
       assert {:error, %Error{reason: :invalid_request}} = Pcm.slice(<<>>, 0, 0, 0.1)

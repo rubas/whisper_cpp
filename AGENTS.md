@@ -48,6 +48,11 @@ requests, so a push to a branch with no open pull request runs nothing.
   select one with `WHISPER_CPP_VARIANT`. The darwin artefact is built with
   `metal`. The other features in `Cargo.toml` (`vulkan`, `coreml`,
   `intel-sycl`, `openblas`, `openmp`) are source build only.
+- A change to `WHISPER_CPP_FEATURES`, `WHISPER_CPP_VARIANT`, or
+  `WHISPER_CPP_BUILD` recompiles the NIF wrapper. The `build:*` tasks set them
+  for their own run only, so a later plain `task test` goes back to the
+  precompiled artefact. Test a backend build with the same variables:
+  `WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=cuda task test:integration`.
 - Errors cross the boundary as `{:error, %{type, message, details}}`.
   `errors.rs` sets the type and `WhisperCpp.Error` maps it to a reason atom; an
   unrecognised type becomes `:native_error`. A new type needs both sides.
@@ -66,12 +71,12 @@ requests, so a push to a branch with no open pull request runs nothing.
   contain `native`. Local source builds keep the native tuning.
 - `release.yml` parses `nif_versions:` out of `lib/whisper_cpp/native.ex` with
   `sed`. Reformat that line and the release job fails.
-- A new precompiled variant needs an entry in both the `variants` map of
+- A new precompiled variant needs an entry in both the `@variants` map of
   `native.ex` and the `release.yml` build matrix, and each miss breaks
-  differently. Without the `native.ex` entry the artefact name keeps no variant
-  suffix, so the install picks the CPU artefact without a warning. Without the
-  matrix entry the suffix is there but no such tarball was published, so the
-  install fails on the download.
+  differently. Without the `native.ex` entry the compile fails, because the
+  variant is not published for the target. Without the matrix entry the
+  suffix is there but no such tarball was published, so the install fails on
+  the download.
 - The ROCm build needs the `GPU_TARGETS` arch list in `release.yml`. Without
   gfx1200 and gfx1201 the artefact loads and reports the GPU, then dies on the
   first kernel launch. The release job checks the `.hip_fatbin` size to catch
