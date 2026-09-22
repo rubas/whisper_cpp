@@ -60,6 +60,18 @@ pub(crate) struct TranscriptionResult {
     pub(crate) segments: Vec<SegmentResult>,
 }
 
+impl TranscriptionResult {
+    /// A result without segments reports the resolved request, or "" when
+    /// auto-detection never ran.
+    fn empty(language: Option<String>, duration_s: f32) -> Self {
+        Self {
+            language: language.unwrap_or_default(),
+            duration_s,
+            segments: Vec::new(),
+        }
+    }
+}
+
 /// Saturating cast for `u32` count-like values handed to whisper-rs
 /// APIs that use `i32`. Realistic values (thread counts, beam sizes,
 /// millisecond offsets) never overflow.
@@ -283,11 +295,7 @@ pub(crate) fn transcribe_one(
     let (inference_samples, vad_ranges) = match vad_outcome {
         Some(VadOutcome::NoSpeech) => {
             // No detection ran; report the resolved request or none.
-            return Ok(TranscriptionResult {
-                language: language.unwrap_or_default(),
-                duration_s,
-                segments: Vec::new(),
-            });
+            return Ok(TranscriptionResult::empty(language, duration_s));
         }
         Some(VadOutcome::Speech { filtered, ranges }) => {
             drop(samples);
@@ -300,16 +308,11 @@ pub(crate) fn transcribe_one(
     // a flag raised during the VAD pass before paying for the encoder.
     // Without VAD a raised flag goes through `full()`, so the abort
     // callback stays the one path that cancels inference.
-    if vad_ranges.is_some()
-        && abort_flag
-            .as_ref()
-            .is_some_and(|f| f.load(Ordering::SeqCst))
-    {
-        return Ok(TranscriptionResult {
-            language: language.unwrap_or_default(),
-            duration_s,
-            segments: Vec::new(),
-        });
+    let raised = abort_flag
+        .as_ref()
+        .is_some_and(|f| f.load(Ordering::SeqCst));
+    if vad_ranges.is_some() && raised {
+        return Ok(TranscriptionResult::empty(language, duration_s));
     }
 
     let mut state: WhisperState = {
@@ -335,10 +338,25 @@ pub(crate) fn transcribe_one(
     }
 
     let n_segments = usize::try_from(state.full_n_segments()).unwrap_or(0);
-    let mut segments = Vec::with_capacity(n_segments);
 
+    // With no decoded segments there was no detection: report the resolved
+    // request (or "" when auto-detect found nothing to detect) instead of
+    // the state's lang_id default, which reads as a fabricated "en".
+    let language = if n_segments == 0 {
+        language.unwrap_or_default()
+    } else {
+        whisper_rs::get_lang_str(state.full_lang_id_from_state())
+            .map(str::to_owned)
+            .or(language)
+            .unwrap_or_default()
+    };
+
+    let words = request
+        .word_timestamps
+        .then(|| WordSplit::for_output(&language, request.translate));
+    let mut segments = Vec::with_capacity(n_segments);
     for seg in state.as_iter() {
-        segments.push(extract_segment(&seg, request.word_timestamps, token_eot)?);
+        segments.push(extract_segment(&seg, words, token_eot)?);
     }
 
     if let Some(ref ranges) = vad_ranges {
@@ -354,20 +372,6 @@ pub(crate) fn transcribe_one(
         }
     }
 
-    // With no decoded segments there was no detection: report the
-    // resolved request (or "" when auto-detect found nothing to detect)
-    // instead of the state's lang_id default, which reads as a
-    // fabricated "en".
-    let language = if segments.is_empty() {
-        language.unwrap_or_default()
-    } else {
-        let id = state.full_lang_id_from_state();
-        whisper_rs::get_lang_str(id)
-            .map(str::to_owned)
-            .or(language)
-            .unwrap_or_default()
-    };
-
     Ok(TranscriptionResult {
         language,
         duration_s,
@@ -377,7 +381,7 @@ pub(crate) fn transcribe_one(
 
 fn extract_segment(
     seg: &whisper_rs::WhisperSegment<'_>,
-    word_timestamps: bool,
+    words: Option<WordSplit>,
     token_eot: u32,
 ) -> anyhow::Result<SegmentResult> {
     let text = seg
@@ -394,11 +398,7 @@ fn extract_segment(
     let mut tokens = Vec::with_capacity(token_cap);
     let mut total_logprob = 0.0_f32;
     let mut counted: u32 = 0;
-    let mut word_tokens: Option<Vec<WordToken>> = if word_timestamps {
-        Some(Vec::new())
-    } else {
-        None
-    };
+    let mut word_tokens: Option<Vec<WordToken>> = words.map(|_| Vec::new());
 
     for t in 0..n_tokens {
         let Some(tok) = seg.get_token(t) else {
@@ -427,7 +427,9 @@ fn extract_segment(
         }
     }
 
-    let words_acc = word_tokens.map(assemble_words);
+    let words_acc = word_tokens
+        .zip(words)
+        .map(|(t, split)| assemble_words(t, split));
 
     #[allow(clippy::cast_precision_loss)]
     let avg_logprob = if counted > 0 {
@@ -456,11 +458,33 @@ struct WordToken {
     p: f32,
 }
 
+/// Where word assembly starts a new word.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum WordSplit {
+    /// At a token with a leading space.
+    Space,
+    /// At every token that does not continue a split codepoint.
+    Codepoint,
+}
+
+impl WordSplit {
+    /// Scripts without spaces between words split per token, like OpenAI
+    /// whisper does for zh, ja, th, lo, my, and yue. A translation emits
+    /// English whatever the source language.
+    fn for_output(language: &str, translate: bool) -> Self {
+        if !translate && matches!(language, "zh" | "ja" | "th" | "lo" | "my" | "yue") {
+            Self::Codepoint
+        } else {
+            Self::Space
+        }
+    }
+}
+
 /// Group decoded tokens into words. Token bytes are accumulated raw and
 /// converted to UTF-8 once per finished word: Whisper's BPE regularly
 /// splits a multibyte character across two tokens, so converting each
 /// token on its own corrupts it (e.g. "schön" becomes "sch\u{FFFD}\u{FFFD}n").
-fn assemble_words(tokens: Vec<WordToken>) -> Vec<WordResult> {
+fn assemble_words(tokens: Vec<WordToken>, split: WordSplit) -> Vec<WordResult> {
     struct WordAcc {
         bytes: Vec<u8>,
         start: f32,
@@ -490,8 +514,12 @@ fn assemble_words(tokens: Vec<WordToken>) -> Vec<WordResult> {
         }
 
         // A leading space byte cannot be a fragment of a split
-        // codepoint: UTF-8 continuation bytes are always >= 0x80.
-        let starts_new_word = tok.bytes.first() == Some(&b' ') || current.is_none();
+        // codepoint: UTF-8 continuation bytes are always 0b10xx_xxxx.
+        let starts_new_word = current.is_none()
+            || match split {
+                WordSplit::Space => tok.bytes.first() == Some(&b' '),
+                WordSplit::Codepoint => tok.bytes.first().is_some_and(|b| b & 0xC0 != 0x80),
+            };
 
         if starts_new_word {
             if let Some(acc) = current.take() {
@@ -590,10 +618,13 @@ mod tests {
     #[test]
     fn assemble_words_reassembles_codepoints_split_across_tokens() {
         // "schön" with the "ö" (0xC3 0xB6) split across two BPE tokens.
-        let words = assemble_words(vec![
-            word_token(b" sch\xC3", 0, 10, 0.9),
-            word_token(b"\xB6n", 10, 20, 0.8),
-        ]);
+        let words = assemble_words(
+            vec![
+                word_token(b" sch\xC3", 0, 10, 0.9),
+                word_token(b"\xB6n", 10, 20, 0.8),
+            ],
+            WordSplit::Space,
+        );
 
         assert_eq!(words.len(), 1);
         assert_eq!(words[0].text, "schön");
@@ -604,22 +635,76 @@ mod tests {
 
     #[test]
     fn assemble_words_splits_on_leading_space() {
-        let words = assemble_words(vec![
-            word_token(b" ask", 0, 10, 0.9),
-            word_token(b" not", 10, 20, 0.7),
-        ]);
+        let words = assemble_words(
+            vec![
+                word_token(b" ask", 0, 10, 0.9),
+                word_token(b" not", 10, 20, 0.7),
+            ],
+            WordSplit::Space,
+        );
 
         let texts: Vec<&str> = words.iter().map(|w| w.text.as_str()).collect();
         assert_eq!(texts, ["ask", "not"]);
     }
 
     #[test]
+    fn assemble_words_splits_unspaced_scripts_per_token() {
+        // "你好世界。" with the "世" (0xE4 0xB8 0x96) split across two tokens.
+        let words = assemble_words(
+            vec![
+                word_token("你好".as_bytes(), 0, 40, 0.9),
+                word_token(b"\xE4\xB8", 40, 60, 0.8),
+                word_token(b"\x96\xE7\x95\x8C", 60, 90, 0.7),
+                word_token("。".as_bytes(), 90, 100, 0.9),
+            ],
+            WordSplit::Codepoint,
+        );
+
+        let spans: Vec<(&str, f32, f32)> = words
+            .iter()
+            .map(|w| (w.text.as_str(), w.start, w.end))
+            .collect();
+        assert_eq!(
+            spans,
+            [("你好", 0.0, 0.4), ("世界", 0.4, 0.9), ("。", 0.9, 1.0)]
+        );
+        assert!((words[1].probability - 0.7).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn word_split_is_per_token_only_for_transcribed_unspaced_scripts() {
+        assert_eq!(WordSplit::for_output("zh", false), WordSplit::Codepoint);
+        assert_eq!(WordSplit::for_output("yue", false), WordSplit::Codepoint);
+        assert_eq!(WordSplit::for_output("zh", true), WordSplit::Space);
+        assert_eq!(WordSplit::for_output("de", false), WordSplit::Space);
+        assert_eq!(WordSplit::for_output("", false), WordSplit::Space);
+    }
+
+    #[test]
+    fn assemble_words_splits_japanese_kana_per_token() {
+        let words = assemble_words(
+            vec![
+                word_token("こんにちは".as_bytes(), 0, 50, 0.9),
+                word_token("、".as_bytes(), 50, 55, 0.9),
+                word_token("世界".as_bytes(), 55, 90, 0.8),
+            ],
+            WordSplit::Codepoint,
+        );
+
+        let texts: Vec<&str> = words.iter().map(|w| w.text.as_str()).collect();
+        assert_eq!(texts, ["こんにちは", "、", "世界"]);
+    }
+
+    #[test]
     fn assemble_words_skips_special_tokens() {
-        let words = assemble_words(vec![
-            word_token(b"<|endoftext|>", 0, 0, 1.0),
-            word_token(b"[_TT_50]", 0, 0, 1.0),
-            word_token(b" hi", 0, 10, 0.9),
-        ]);
+        let words = assemble_words(
+            vec![
+                word_token(b"<|endoftext|>", 0, 0, 1.0),
+                word_token(b"[_TT_50]", 0, 0, 1.0),
+                word_token(b" hi", 0, 10, 0.9),
+            ],
+            WordSplit::Space,
+        );
 
         assert_eq!(words.len(), 1);
         assert_eq!(words[0].text, "hi");
