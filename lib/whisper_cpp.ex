@@ -263,12 +263,10 @@ defmodule WhisperCpp do
     with :ok <- validate_options(opts, transcribe_validators()),
          :ok <- validate_vad_options(opts),
          :ok <- validate_slice_range(start_s, end_s),
-         {:ok, slice} <- Pcm.slice(samples, sample_rate(), start_s, end_s - start_s),
-         {:ok, transcription} <- do_transcribe(model, slice, opts, start_s * 1.0) do
-      {:ok, transcription}
-    else
-      {:short, _} -> short_slice_result(model, samples, start_s, end_s, opts)
-      err -> err
+         {:ok, slice} <- Pcm.slice(samples, sample_rate(), start_s, end_s - start_s) do
+      if short_window?(start_s, end_s),
+        do: short_slice_result(model, slice, start_s, end_s, opts),
+        else: do_transcribe(model, slice, opts, start_s * 1.0)
     end
   end
 
@@ -287,53 +285,55 @@ defmodule WhisperCpp do
          end_s: end_s
        })}
 
+  defp validate_slice_range(_start_s, _end_s), do: :ok
+
   # Strictly-below comparison with an epsilon: a window of exactly the
   # documented 0.3 s minimum must transcribe even when float subtraction
   # lands a hair under (2.3 - 2.0 == 0.2999...).
-  defp validate_slice_range(start_s, end_s) when end_s - start_s < 0.3 - 1.0e-9,
-    do: {:short, end_s - start_s}
+  defp short_window?(start_s, end_s), do: end_s - start_s < 0.3 - 1.0e-9
 
-  defp validate_slice_range(_start_s, _end_s), do: :ok
-
-  # Sub-0.3 s windows return an empty transcription, but only after the
-  # same buffer checks a full slice would run - an out-of-bounds or
-  # malformed request is a caller bug regardless of window size.
-  defp short_slice_result(model, samples, start_s, end_s, opts) do
-    cond do
-      rem(byte_size(samples), 4) != 0 ->
-        {:error,
-         Error.new(:invalid_request, "samples binary length must be a multiple of 4 (f32)", %{
-           byte_size: byte_size(samples)
-         })}
-
-      end_s > Pcm.duration_s(samples, sample_rate()) ->
-        {:error,
-         Error.new(:invalid_request, "requested window extends past the end of the buffer", %{
-           start_s: start_s,
-           end_s: end_s,
-           buffer_duration_s: Pcm.duration_s(samples, sample_rate())
-         })}
-
-      true ->
-        with :ok <- validate_request_semantics(model, opts) do
-          {:ok, empty_transcription(start_s, end_s, Keyword.get(opts, :language))}
-        end
+  # Sub-0.3 s windows return an empty transcription without inference,
+  # but only after the checks the native path runs on the same window.
+  defp short_slice_result(model, slice, start_s, end_s, opts) do
+    with :ok <- check_finite(slice, 0),
+         {:ok, language} <- validate_request_semantics(model, opts) do
+      {:ok, empty_transcription(start_s, end_s, language)}
     end
+  end
+
+  # Mirrors `decode_pcm_f32` in lib.rs. A float segment does not match
+  # NaN or infinity, so the last clause catches them.
+  defp check_finite(<<>>, _index), do: :ok
+  defp check_finite(<<_::little-float-32, rest::binary>>, index), do: check_finite(rest, index + 1)
+
+  defp check_finite(_samples, index) do
+    {:error,
+     Error.new(
+       :invalid_request,
+       "samples binary contains a non-finite sample (NaN or infinity); " <>
+         "the upstream decoder produced corrupted audio",
+       %{sample_index: index}
+     )}
   end
 
   # Mirrors the native request checks (`resolve_language` and friends in
   # transcribe.rs, which stay authoritative for full runs) so semantics
   # do not depend on slice length: a request the native path rejects
-  # must not succeed just because the window is under 0.3 s.
+  # must not succeed just because the window is under 0.3 s. Returns the
+  # language an empty native result reports.
   defp validate_request_semantics(%Model{multilingual: multilingual}, opts) do
-    with :ok <- check_language(Keyword.get(opts, :language), multilingual),
+    with {:ok, language} <- check_language(Keyword.get(opts, :language), multilingual),
          :ok <- check_translate(Keyword.get(opts, :translate, false), multilingual),
-         :ok <- check_prompt(Keyword.get(opts, :initial_prompt)) do
-      check_vad_path(Keyword.get(opts, :vad_model_path))
+         :ok <- check_prompt(Keyword.get(opts, :initial_prompt)),
+         :ok <- check_vad_path(Keyword.get(opts, :vad_model_path)) do
+      {:ok, language}
     end
   end
 
-  defp check_language(language, _multilingual) when language in [nil, "auto"], do: :ok
+  # nil and "auto" auto-detect on a multilingual model, which reports ""
+  # when nothing was decoded; an English-only model resolves them to "en".
+  defp check_language(language, multilingual) when language in [nil, "auto"],
+    do: {:ok, if(multilingual, do: "", else: "en")}
 
   defp check_language(language, multilingual) do
     cond do
@@ -354,7 +354,7 @@ defmodule WhisperCpp do
          )}
 
       true ->
-        :ok
+        {:ok, language}
     end
   end
 
@@ -388,7 +388,7 @@ defmodule WhisperCpp do
     %Transcription{
       text: "",
       segments: [],
-      language: language || "",
+      language: language,
       duration_s: (end_s - start_s) * 1.0
     }
   end

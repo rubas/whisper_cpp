@@ -293,6 +293,37 @@ defmodule WhisperCppTest do
                WhisperCpp.transcribe_slice(multilingual, buffer, {0.0, 0.1}, language: "de")
     end
 
+    test "rejects non-finite samples inside the short window only", %{model: model} do
+      silence = <<0::size(16_000 * 4)-unit(8)>>
+
+      for bad <- [<<0, 0, 0xC0, 0x7F>>, <<0, 0, 0x80, 0x7F>>, <<0, 0, 0x80, 0xFF>>] do
+        buffer = silence <> bad <> silence
+
+        assert {:error, %Error{reason: :invalid_request, message: msg, details: %{sample_index: 1_000}}} =
+                 WhisperCpp.transcribe_slice(model, buffer, {0.9375, 1.0375})
+
+        assert msg =~ "non-finite"
+
+        assert {:ok, %WhisperCpp.Transcription{text: ""}} =
+                 WhisperCpp.transcribe_slice(model, buffer, {0.0, 0.1})
+      end
+    end
+
+    test "reports the language an empty native result reports", %{model: english_only, buffer: buffer} do
+      multilingual = %{english_only | multilingual: true}
+
+      for {model, language, expected} <- [
+            {english_only, nil, "en"},
+            {english_only, "auto", "en"},
+            {english_only, "en", "en"},
+            {multilingual, nil, ""},
+            {multilingual, "auto", ""}
+          ] do
+        assert {:ok, %WhisperCpp.Transcription{language: ^expected}} =
+                 WhisperCpp.transcribe_slice(model, buffer, {0.0, 0.1}, language: language)
+      end
+    end
+
     test "applies model semantics on the short path", %{model: model, buffer: buffer} do
       # `model` is English-only: requests the native path rejects must
       # not succeed just because the window is short.
