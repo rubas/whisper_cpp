@@ -60,6 +60,10 @@ requests, so a push to a branch with no open pull request runs nothing.
 
 ## Pitfalls
 
+- `release.yml` builds with `GGML_NATIVE=OFF` and `GGML_CPU_ARM_ARCH` from the
+  matrix. Drop them and ggml builds for the runner CPU, so the artefact can die
+  with SIGILL on an older CPU. The release job fails when the ggml CPU flags
+  contain `native`. Local source builds keep the native tuning.
 - `release.yml` parses `nif_versions:` out of `lib/whisper_cpp/native.ex` with
   `sed`. Reformat that line and the release job fails.
 - A new precompiled variant needs an entry in both the `variants` map of
