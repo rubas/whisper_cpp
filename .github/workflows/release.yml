@@ -254,10 +254,10 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
         run: |
-          FLAGS="$(grep -h 'Adding CPU backend variant' native/whisper_cpp_native/target/"${TARGET}"/release/build/whisper-rs-sys-*/output)"
-          echo "$FLAGS"
-          if [[ "$FLAGS" == *native* ]]; then
-            echo "::error::ggml built for the runner CPU; refusing to publish"
+          BUILD_DIR="$(echo native/whisper_cpp_native/target/"${TARGET}"/release/build/whisper-rs-sys-*)"
+          grep -h 'Adding CPU backend variant' "$BUILD_DIR/output"
+          if ! grep -qx 'GGML_NATIVE:BOOL=OFF' "$BUILD_DIR/out/build/CMakeCache.txt"; then
+            echo "::error::ggml built with GGML_NATIVE for the runner CPU; refusing to publish"
             exit 1
           fi
 
