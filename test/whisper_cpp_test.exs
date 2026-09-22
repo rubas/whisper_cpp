@@ -340,6 +340,11 @@ defmodule WhisperCppTest do
 
       assert msg =~ "past the end"
     end
+
+    test "rejects an end time too large to convert to samples", %{model: m, samples: s} do
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe_slice(m, s, {0.0, 1.0e308})
+    end
   end
 
   describe "build_transcription/2" do

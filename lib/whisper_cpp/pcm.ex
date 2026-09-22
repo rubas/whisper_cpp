@@ -67,12 +67,14 @@ defmodule WhisperCpp.Pcm do
 
   defp do_slice(samples, sample_rate, start_s, duration_s) do
     total_samples = div(byte_size(samples), @bytes_per_sample)
-    # Round, do not truncate: millisecond-precise times otherwise lose
-    # their last sample to float representation error.
-    start_sample = round(start_s * sample_rate)
-    requested_samples = round(duration_s * sample_rate)
-    end_sample = start_sample + requested_samples
     buffer_duration_s = total_samples / sample_rate
+    # Round, do not truncate: millisecond-precise times otherwise lose
+    # their last sample to float representation error. Clamp before the
+    # multiply, because a huge float overflows it and raises; a clamped
+    # time still lands past the end, so the checks below reject it.
+    start_sample = round(min(start_s, buffer_duration_s) * sample_rate)
+    requested_samples = round(min(duration_s, buffer_duration_s + 1) * sample_rate)
+    end_sample = start_sample + requested_samples
 
     cond do
       requested_samples <= 0 ->
