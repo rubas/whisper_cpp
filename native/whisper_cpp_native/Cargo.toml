@@ -61,11 +61,11 @@ opt-level = 2
 # (codeberg.org/tazz4843/whisper-rs issues 277/271, fix PR 278) and
 # vendors whisper.cpp 1.8.3. The `vendor/whisper-rs-0.16.0-patched`
 # branch of this repo carries the published 0.16.0 with the callback
-# and CString-leak fixes plus the whisper.cpp submodule at v1.8.6. Drop
+# and CString-leak fixes plus the whisper.cpp submodule at v1.9.4. Drop
 # both patches once a whisper-rs release lands the fixes and re-vendors
 # (issue #26). Known upstream design holes left untouched (unreachable
 # from this crate, which never clones FullParams): cloning a FullParams
 # shares the installed closures and grammar pointers across clones.
 [patch.crates-io]
-whisper-rs = { git = "https://github.com/rubas/whisper_cpp.git", rev = "d5674fcf42bf09f38d880ccaf4084e5bcf769e47" }
-whisper-rs-sys = { git = "https://github.com/rubas/whisper_cpp.git", rev = "d5674fcf42bf09f38d880ccaf4084e5bcf769e47" }
+whisper-rs = { git = "https://github.com/rubas/whisper_cpp.git", rev = "9a4232f1e2f1fc93987746cb080c074229673fc7" }
+whisper-rs-sys = { git = "https://github.com/rubas/whisper_cpp.git", rev = "9a4232f1e2f1fc93987746cb080c074229673fc7" }

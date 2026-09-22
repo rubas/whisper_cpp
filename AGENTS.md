@@ -40,7 +40,7 @@ requests, so a push to a branch with no open pull request runs nothing.
 
 - `whisper-rs` and `whisper-rs-sys` resolve through a `[patch.crates-io]` pin to
   a vendor branch of this repo, not from crates.io. That branch adds the
-  callback and CString-leak fixes and moves the whisper.cpp submodule to v1.8.6.
+  callback and CString-leak fixes and moves the whisper.cpp submodule to v1.9.4.
   A `whisper-rs` version bump means re-checking the patch, see issue #26.
 - One accelerator per build. `WHISPER_CPP_FEATURES` picks the cargo feature and
   `WHISPER_CPP_BUILD=1` forces a source build. Precompiled variants exist only

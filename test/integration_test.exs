@@ -357,6 +357,12 @@ defmodule WhisperCpp.IntegrationTest do
     assert {:ok, %WhisperCpp.Transcription{}} =
              WhisperCpp.transcribe(model_ref, {:pcm_f32, short_pcm}, language: "en", n_threads: 4)
 
+    # One sample: shorter than the 200-sample reflect pad of the mel
+    # spectrogram. It returns an empty transcription. Without ASan this
+    # test cannot detect an out-of-bounds read in the pad.
+    assert {:ok, %WhisperCpp.Transcription{segments: []}} =
+             WhisperCpp.transcribe(model_ref, {:pcm_f32, <<0.0::little-float-32>>}, language: "en")
+
     assert {:error, %WhisperCpp.Error{reason: :invalid_request}} =
              WhisperCpp.transcribe(model_ref, {:pcm_f32, ""}, language: "en")
   end
