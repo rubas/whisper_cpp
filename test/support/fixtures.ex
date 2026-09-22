@@ -4,8 +4,7 @@ defmodule WhisperCpp.Test.Fixtures do
 
   The integration suite downloads the `ggml-tiny.en` and the multilingual
   `ggml-tiny` model (~75 MB each) on first run and caches them under
-  `test/fixtures/`. Set
-  `WHISPER_CPP_REFRESH=1` to force a re-download.
+  `test/fixtures/`. Set `WHISPER_CPP_REFRESH=1` to force a re-download.
 
   Audio is shipped as a pre-converted PCM fixture (`jfk.f32le.16k.pcm`
   alongside this file) so tests need neither ffmpeg nor the JFK WAV
