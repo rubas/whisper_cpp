@@ -25,6 +25,13 @@ defmodule WhisperCppTest do
       assert msg =~ "non-empty"
     end
 
+    test "rejects a path that is not valid UTF-8" do
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.load_model(<<0xFF, 0xFE>>)
+
+      assert msg =~ "UTF-8"
+    end
+
     test "rejects unknown options" do
       assert {:error, %Error{reason: :invalid_request, message: msg}} =
                WhisperCpp.load_model("/tmp/whatever.bin", made_up: true)
@@ -162,6 +169,24 @@ defmodule WhisperCppTest do
 
       assert {:error, %Error{reason: :invalid_request}} =
                WhisperCpp.transcribe(model, pcm, logprob_thold: -1.0e300)
+    end
+
+    test "rejects integer thresholds outside i64", %{model: model, pcm: pcm} do
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe(model, pcm, logprob_thold: 9_223_372_036_854_775_808)
+
+      assert {:error, %Error{reason: :invalid_request}} =
+               WhisperCpp.transcribe(model, pcm, no_speech_thold: -9_223_372_036_854_775_809)
+    end
+
+    test "rejects a progress pid on another node", %{model: model, pcm: pcm} do
+      node = "other@host"
+      remote_pid = :erlang.binary_to_term(<<131, 88, 119, byte_size(node), node::binary, 1::32, 0::32, 1::32>>)
+
+      assert {:error, %Error{reason: :invalid_request, message: msg}} =
+               WhisperCpp.transcribe(model, pcm, progress_pid: remote_pid)
+
+      assert msg =~ "progress_pid"
     end
 
     test "rejects invalid UTF-8 in string options", %{model: model, pcm: pcm} do

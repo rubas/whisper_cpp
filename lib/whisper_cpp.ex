@@ -221,7 +221,7 @@ defmodule WhisperCpp do
     with whatever segments completed before the abort took effect. The
     VAD pass itself is not interruptible; the flag is honoured right
     after it, before the encoder starts.
-  - `:progress_pid` - pid that receives `{:whisper_progress, percent}`
+  - `:progress_pid` - local pid that receives `{:whisper_progress, percent}`
     messages (0..100) as work advances; duplicate percentages are
     coalesced. Messages already in flight can arrive after the call
     returns.
@@ -544,8 +544,8 @@ defmodule WhisperCpp do
 
   @spec validate_non_empty_string(String.t(), atom()) :: :ok | {:error, Error.t()}
   defp validate_non_empty_string(value, name) do
-    if String.trim(value) == "" do
-      {:error, Error.new(:invalid_request, "#{name} must be a non-empty string")}
+    if not String.valid?(value) or String.trim(value) == "" do
+      {:error, Error.new(:invalid_request, "#{name} must be a non-empty UTF-8 string")}
     else
       :ok
     end
@@ -625,7 +625,8 @@ defmodule WhisperCpp do
   defp valid_abort_handle?(_), do: false
 
   defp valid_optional_pid?(nil), do: true
-  defp valid_optional_pid?(pid) when is_pid(pid), do: true
+  # The NIF sends progress with enif_send, which reaches local pids only.
+  defp valid_optional_pid?(pid) when is_pid(pid), do: node(pid) == node()
   defp valid_optional_pid?(_), do: false
 
   @spec validate_options(keyword(), map()) :: :ok | {:error, Error.t()}
@@ -675,8 +676,12 @@ defmodule WhisperCpp do
   defp positive_integer?(v), do: is_integer(v) and v > 0 and v <= @u32_max
   defp non_neg_integer?(v), do: is_integer(v) and v >= 0 and v <= @u32_max
   # Floats cross the NIF as f32; values outside its range fail decode
-  # with a raise instead of an error tuple.
+  # with a raise instead of an error tuple. Rustler reads an integer term
+  # for an f32 field through i64, so integers stay inside that range.
   @f32_max 3.402_823_5e38
+  @i64_min -9_223_372_036_854_775_808
+  @i64_max 9_223_372_036_854_775_807
 
-  defp number?(v), do: (is_integer(v) or is_float(v)) and abs(v) <= @f32_max
+  defp number?(v) when is_integer(v), do: v >= @i64_min and v <= @i64_max
+  defp number?(v), do: is_float(v) and abs(v) <= @f32_max
 end

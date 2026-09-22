@@ -77,7 +77,7 @@ defmodule WhisperCpp.Native do
   `samples_bin` is a binary of little-endian `f32` mono samples at 16 kHz.
   `abort_handle` is either `nil` or an opaque resource minted by
   `new_abort_handle/0`; signalling it from another process cancels
-  in-flight inference. `progress_pid` is `nil` or a pid that receives
+  in-flight inference. `progress_pid` is `nil` or a local pid that receives
   `{:whisper_progress, percent}` messages as work advances.
   """
   @spec transcribe(reference(), binary(), map(), reference() | nil, pid() | nil) ::
