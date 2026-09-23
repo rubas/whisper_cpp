@@ -262,7 +262,7 @@ jobs:
           fi
 
       # Sanity check: a real hipBLAS build with the gfx1100-1201 arch
-      # set embeds ~15 MiB of compressed device code. If the build
+      # set embeds ~325 MiB of device code (v0.5.0). If the build
       # silently fell back to an empty arch list (legacy hipcc default
       # or a stale cmake state), the .hip_fatbin section shrinks to a
       # few hundred KB and kernel launches die at runtime. Fail the
