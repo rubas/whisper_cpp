@@ -443,7 +443,7 @@ defmodule WhisperCppTest do
       transcription = WhisperCpp.build_transcription(payload, 0.0)
       assert transcription.text == "Hello world"
       assert transcription.language == "en"
-      assert length(transcription.segments) == 2
+      assert [%{text: " Hello"}, %{text: " world"}] = transcription.segments
     end
 
     test "shifts timestamps by offset" do

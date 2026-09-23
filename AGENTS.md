@@ -59,8 +59,10 @@ requests, so a push to a branch with no open pull request runs nothing.
   unrecognised type becomes `:native_error`. A new type needs both sides.
 - No silent fallback. An unknown option, a device the artefact does not carry,
   and an audio shape the library rejects all return an error, never a default.
-- Credo runs `--strict` with the ExSlop and ExDNA checks. `Readability.Specs` is
-  on, so a public function without a `@spec` fails the gate.
+- Credo runs `--strict` with the ExDNA check and every check in
+  `ExSlop.recommended_checks/0`, so an ExSlop bump turns on its new recommended
+  checks. `Readability.Specs` is on, so a public function without a `@spec`
+  fails the gate.
   `Readability.ModuleDoc` is off, so a `@moduledoc` on every public module is a
   house rule that no check catches. Write it anyway.
 
