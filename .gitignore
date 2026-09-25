@@ -24,5 +24,4 @@ test/fixtures/*
 
 # Editor / agent
 .claude/
-.jj/
 .antigravitycli/
