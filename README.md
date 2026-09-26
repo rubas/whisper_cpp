@@ -1,10 +1,8 @@
 # whisper_cpp
 
-A thin Elixir wrapper around [`whisper-rs`](https://codeberg.org/tazz4843/whisper-rs),
-the Rust bindings to [whisper.cpp](https://github.com/ggerganov/whisper.cpp).
-It exposes whisper.cpp speech-to-text to the BEAM through a Rustler NIF: load a
-model, hand it 16 kHz mono f32 PCM, get structured segments back. No subprocess,
-no Python, no temporary files.
+Elixir bindings for [whisper.cpp](https://github.com/ggerganov/whisper.cpp) speech-to-text. A Rustler NIF on the
+[`whisper-rs`](https://codeberg.org/tazz4843/whisper-rs) crate runs whisper.cpp in the BEAM process. You load a model,
+pass it 16 kHz mono f32 PCM, and get back structured segments. No subprocess, no Python, no temporary files.
 
 ## Installation
 
@@ -14,15 +12,15 @@ def deps do
 end
 ```
 
-Installation downloads a precompiled NIF for your target from the project's
-GitHub releases - no Rust toolchain needed. Requires Elixir 1.19+.
+Mix downloads a precompiled NIF for your target from the GitHub releases, so you need no Rust toolchain. The package
+needs Elixir 1.19 or newer.
 
 ## Usage
 
 ```elixir
 {:ok, model} = WhisperCpp.load_model("models/ggml-large-v3.bin")
 
-# Decode upstream (ffmpeg, bumblebee, ...) into 16 kHz mono f32 PCM:
+# Decode the audio first (ffmpeg, bumblebee, ...) into 16 kHz mono f32 PCM:
 #   ffmpeg -i jfk.wav -f f32le -ac 1 -ar 16000 jfk.pcm
 pcm = File.read!("jfk.pcm")
 
@@ -33,33 +31,33 @@ IO.puts(text)
 for s <- segs, do: IO.puts("[#{s.start}-#{s.end}] #{s.text}")
 ```
 
-Audio is always `{:pcm_f32, binary}` - little-endian f32 samples, mono, 16 kHz,
-normalised to `[-1.0, 1.0]`. The library does **not** decode WAV/MP3/etc;
-decode upstream. `transcribe_slice/4` runs a `[start_s, end_s)` window of a
-master PCM buffer and shifts the returned times back into the source timeline.
+Audio is always `{:pcm_f32, binary}`: little-endian f32 samples, mono, 16 kHz, in the range `[-1.0, 1.0]`. The library
+does not decode WAV, MP3, or other formats; decode them before the call. `transcribe_slice/4` transcribes a
+`[start_s, end_s)` window of a larger PCM buffer and returns times on the timeline of the full buffer.
 
-Built-in silero voice activity detection strips silence before the encoder:
-pass `vad_model_path:` (`ggml-silero-v5.1.2.bin`, ~0.85 MB, from
-[ggml-org/whisper-vad](https://huggingface.co/ggml-org/whisper-vad)) and
-timestamps stay on the original timeline.
+The built-in silero voice activity detection removes silence before the encoder. Pass `vad_model_path:` with
+`ggml-silero-v5.1.2.bin` (about 0.85 MB, from [ggml-org/whisper-vad](https://huggingface.co/ggml-org/whisper-vad)).
+The timestamps stay on the original timeline.
 
-See [the docs](https://hexdocs.pm/whisper_cpp) for the full option list
-(`:translate`, `:initial_prompt`, `:word_timestamps`, `:beam_size`,
-`:n_threads`, VAD tuning, cancellation, progress messages, ...) and error
-handling.
+[The docs](https://hexdocs.pm/whisper_cpp) list all options (`:translate`, `:initial_prompt`, `:word_timestamps`,
+`:beam_size`, `:n_threads`, VAD tuning, cancellation, progress messages, and more) and the errors.
 
 ## Backends
 
-CPU is available in every build except `coreml` (see below). Pick one
-accelerator per build; the precompiled Hex package ships CPU plus `cuda` /
-`hipblas` variants for Linux and Metal on Apple Silicon, selected via
-`WHISPER_CPP_VARIANT`:
+Each build has one accelerator. Every build also runs on the CPU, except `coreml`. The precompiled package has a CPU
+build for each target, `cuda` and `hipblas` variants for Linux, and Metal on Apple Silicon. `WHISPER_CPP_VARIANT`
+selects a variant:
 
 ```bash
 WHISPER_CPP_VARIANT=cuda mix deps.compile whisper_cpp
 ```
 
-The precompiled NIFs need this CPU baseline:
+| Variant   | Targets                                                 |
+| --------- | ------------------------------------------------------- |
+| `cuda`    | `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` |
+| `hipblas` | `x86_64-unknown-linux-gnu`                              |
+
+The precompiled NIFs, the GPU variants included, need this CPU:
 
 | Target                      | Minimum CPU                                                         |
 | --------------------------- | ------------------------------------------------------------------- |
@@ -67,38 +65,29 @@ The precompiled NIFs need this CPU baseline:
 | `aarch64-unknown-linux-gnu` | ARMv8.2-A with dotprod and fp16 (Neoverse N1, Cortex-A76, or newer) |
 | `aarch64-apple-darwin`      | Apple M1 or newer                                                   |
 
-The `cuda` and `hipblas` variants need the same CPU. On an older CPU, build
-from source with `WHISPER_CPP_BUILD=1`. A source build tunes ggml for the CPU
-it runs on.
+On an older CPU, build from source with `WHISPER_CPP_BUILD=1`. A source build tunes ggml for the CPU it runs on. This
+baseline applies from 0.5.0. Up to 0.4.1, the `aarch64-unknown-linux-gnu` NIFs need SVE and i8mm, and the 0.3.1
+`x86_64-unknown-linux-gnu` NIF needs AVX-512.
 
-This baseline applies from 0.5.0 on. Releases up to 0.4.1 were tuned
-for the CPU of the release runner. Their `aarch64-unknown-linux-gnu` artefacts
-need SVE and i8mm, and the 0.3.1 `x86_64-unknown-linux-gnu` artefact needs
-AVX-512. On a CPU without these, build those versions from source.
-
-To build from source with any whisper-rs backend (`cuda`, `hipblas`, `vulkan`,
-`metal`, `coreml`, `intel-sycl`, `openblas`, `openmp`):
+A source build can use any `whisper-rs` backend: `cuda`, `hipblas`, `vulkan`, `metal`, `coreml`, `intel-sycl`,
+`openblas`, or `openmp`.
 
 ```bash
 WHISPER_CPP_BUILD=1 WHISPER_CPP_FEATURES=cuda mix deps.compile whisper_cpp
 ```
 
-Source builds need Rust 1.98 or later, `cmake`, a C++17 compiler, and the
-backend's own SDK (CUDA toolkit, ROCm, Vulkan SDK, ...).
+A source build needs Rust 1.98 or newer, `cmake`, a C++17 compiler, and the SDK of the backend (CUDA toolkit, ROCm,
+Vulkan SDK, ...).
 
-A `coreml` build uses the Core ML encoder whenever the model's
-`-encoder.mlmodelc` is present and cannot turn it off per model. It rejects
-`device: :cpu` and `use_gpu: false` with `:invalid_request`; build without
-`coreml` for CPU-only inference.
+A `coreml` build uses the Core ML encoder whenever the model's `-encoder.mlmodelc` exists, and you cannot turn it off
+per model. It returns `:invalid_request` for `device: :cpu` and `use_gpu: false`. For CPU-only inference, build without
+`coreml`.
 
-## Testing
+## Development
 
-```bash
-mix test                  # unit tests, no downloads
-mix test --include integration  # downloads ggml-tiny.en + ggml-tiny, real inference
-```
+`task check` runs the format check, compile, lint, the Elixir and Rust unit tests, and `zizmor` on the workflows.
+`task test:integration` downloads `ggml-tiny.en` and `ggml-tiny` (about 75 MB each) and runs real inference.
 
 ## License
 
-MIT. whisper.cpp is MIT-licensed; `whisper-rs` is public domain (Unlicense)
-and vendors whisper.cpp, linking it statically.
+MIT. whisper.cpp is MIT. `whisper-rs` is public domain (Unlicense); it vendors whisper.cpp and links it statically.
