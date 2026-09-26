@@ -52,10 +52,10 @@ selects a variant:
 WHISPER_CPP_VARIANT=cuda mix deps.compile whisper_cpp
 ```
 
-| Variant   | Targets                                                  |
-| --------- | -------------------------------------------------------- |
+| Variant   | Targets                                                 |
+| --------- | ------------------------------------------------------- |
 | `cuda`    | `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` |
-| `hipblas` | `x86_64-unknown-linux-gnu`                               |
+| `hipblas` | `x86_64-unknown-linux-gnu`                              |
 
 The precompiled NIFs, the GPU variants included, need this CPU:
 
