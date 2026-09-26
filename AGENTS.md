@@ -14,27 +14,18 @@ bumblebee) and share one decoded buffer across a pipeline.
 
 ## Gates
 
-`task check` is the gate: format check, compile, credo, Elixir tests, Rust
-tests, zizmor. `ci.yml` runs the same target on pushes to `main` and on pull
-requests, so a push to a branch with no open pull request runs nothing.
-`task --list` shows the rest.
+`ci.yml` runs `task check` on pushes to `main` and on pull requests, so a
+push to a branch with no open pull request runs nothing.
 
 - `task test:integration` downloads `ggml-tiny.en` and the multilingual
   `ggml-tiny` (~75 MB each) and runs real inference. `integration.yml` runs it
   weekly and on manual dispatch, never per pull request. Run it locally when you
   touch the NIF boundary.
-- `security.yml` audits Hex and cargo dependencies nightly and files an issue on
-  a finding.
 - `release.yml` builds the six-entry NIF matrix. One backend already takes
   minutes to build from source, so leave the matrix to CI.
 
 ## Layout
 
-- `lib/whisper_cpp/native.ex` holds the NIF stubs plus the
-  `rustler_precompiled` targets, variants, and `nif_versions`.
-- `native/whisper_cpp_native/src/lib.rs` holds the NIF entry points and
-  resources; `transcribe.rs`, `vad.rs`, `errors.rs`, and `native_log.rs` hold
-  the rest.
 - `checksum-Elixir.WhisperCpp.Native.exs` is tracked on purpose, see Release.
 
 ## House decisions
