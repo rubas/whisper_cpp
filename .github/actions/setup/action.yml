@@ -88,15 +88,15 @@ runs:
         restore-keys: |
           ${{ runner.os }}-native-${{ inputs.rust-toolchain }}-
 
-    - name: Cache integration fixtures (model + audio)
+    - name: Cache integration fixtures (models)
       if: ${{ inputs.cache-fixtures == 'true' }}
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           test/fixtures/ggml-tiny.en.bin
           test/fixtures/ggml-tiny.bin
-          test/fixtures/jfk.wav
-        key: ${{ runner.os }}-fixtures-v1
+          test/fixtures/ggml-silero-v5.1.2.bin
+        key: ${{ runner.os }}-fixtures-${{ hashFiles('test/support/fixtures.ex') }}
 
     - name: Install Hex/Rebar + fetch deps
       shell: bash
