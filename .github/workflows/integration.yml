@@ -29,6 +29,7 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read # checkout the repository
+      issues: write # open an issue when the integration run fails
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-integration
       cancel-in-progress: true
@@ -48,3 +49,22 @@ jobs:
 
       - name: Run integration tests
         run: task test:integration
+
+      - name: Report integration failure
+        if: failure()
+        uses: $/.github/actions/report-failure
+        with:
+          result: failure
+          title: Integration Tests Failed
+          subject: integration run
+          labels: >-
+            [{"name": "integration", "color": "fbca04", "description": "Integration test run"},
+            {"name": "automated", "color": "ededed", "description": "Created by automation"}]
+
+      - name: Resolve integration issue on success
+        if: success()
+        uses: $/.github/actions/report-failure
+        with:
+          result: success
+          title: Integration Tests Failed
+          subject: integration run
