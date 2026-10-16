@@ -198,7 +198,9 @@ defmodule WhisperCpp do
     picks `min(4, cores)`.
   - `:n_max_text_ctx` - cap decoder context tokens.
   - `:offset_ms`, `:duration_ms` - clip the audio window; `:duration_ms`
-    must be at least 1.
+    must be at least 1. Language detection and decoding see only the
+    window, as in `transcribe_slice/4`. Timestamps stay absolute on the
+    whole buffer.
   - `:no_speech_thold` - silence detection threshold. Default `0.6`.
   - `:logprob_thold` - reject segments with `avg_logprob` below this.
   - `:suppress_blank`, `:suppress_non_speech_tokens` - decoder suppressions.

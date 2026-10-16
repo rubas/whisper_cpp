@@ -4,6 +4,15 @@ All notable changes to `whisper_cpp` will be documented in this file. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- `transcribe/3` with `:offset_ms` or `:duration_ms` and no
+  `:vad_model_path` detects the language on the window. Before, whisper.cpp
+  detected it on the first 30 s of the whole buffer, so the window could
+  decode in the wrong language. Segments also end inside the window now:
+  before, a `:duration_ms` window could return text from after its end.
+
 ## [0.5.0] - 2026-09-23
 
 Several changes are caller-visible. Items that need an action from the

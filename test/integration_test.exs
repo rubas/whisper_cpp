@@ -53,6 +53,41 @@ defmodule WhisperCpp.IntegrationTest do
     assert first.start >= 2.0
   end
 
+  test "offset and duration window the timeline without VAD", %{model_path: model, pcm: pcm} do
+    {:ok, model_ref} = WhisperCpp.load_model(model)
+
+    assert {:ok, %WhisperCpp.Transcription{segments: [first | _] = segs}} =
+             WhisperCpp.transcribe(model_ref, {:pcm_f32, pcm},
+               language: "en",
+               n_threads: 4,
+               offset_ms: 2_000,
+               duration_ms: 6_000
+             )
+
+    assert first.start >= 2.0
+    assert List.last(segs).end <= 8.5
+  end
+
+  test "offset_ms detects the language on the window, not on the start of the buffer", %{pcm: pcm} do
+    {:ok, model_ref} = WhisperCpp.load_model(Fixtures.ensure_multilingual_model!())
+
+    # 30 s of white noise before the English speech. tiny detects "nn" on
+    # this noise, and "en" on silence, so silence would not show a
+    # detection on the start of the buffer.
+    :rand.seed(:exsss, {1, 2, 3})
+    noise = for _ <- 1..(16_000 * 30), into: <<>>, do: <<(:rand.uniform() - 0.5) * 0.2::little-float-32>>
+    buf = noise <> pcm
+    buf_s = byte_size(buf) / 4 / 16_000
+
+    assert {:ok, %WhisperCpp.Transcription{language: "en", text: text} = windowed} =
+             WhisperCpp.transcribe(model_ref, {:pcm_f32, buf}, offset_ms: 30_000, n_threads: 4)
+
+    assert {:ok, %WhisperCpp.Transcription{language: "en", text: ^text}} =
+             WhisperCpp.transcribe_slice(model_ref, buf, {30.0, buf_s}, n_threads: 4)
+
+    assert hd(windowed.segments).start >= 30.0
+  end
+
   test "word_timestamps attaches per-word timings", %{model_path: model, pcm: pcm} do
     {:ok, model_ref} = WhisperCpp.load_model(model)
 
