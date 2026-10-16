@@ -41,25 +41,6 @@ pub(crate) enum VadOutcome {
     },
 }
 
-/// Select the sample window that `:offset_ms`/`:duration_ms` describe
-/// on the original buffer. whisper.cpp cannot apply them itself when
-/// VAD is active - it would window the silence-stripped timeline.
-pub(crate) fn window(
-    offset_ms: Option<u32>,
-    duration_ms: Option<u32>,
-    n_samples: usize,
-) -> (usize, usize) {
-    const SAMPLES_PER_MS: usize = SAMPLE_RATE / 1000;
-    let start = (offset_ms.unwrap_or(0) as usize * SAMPLES_PER_MS).min(n_samples);
-    let end = match duration_ms {
-        Some(d) => start
-            .saturating_add(d as usize * SAMPLES_PER_MS)
-            .min(n_samples),
-        None => n_samples,
-    };
-    (start, end)
-}
-
 /// Run silero VAD over `samples` (a window starting at
 /// `origin_offset` samples into the original buffer) and stitch the
 /// speech segments into a filtered buffer. Ranges carry original-buffer
@@ -245,15 +226,6 @@ mod tests {
 
     // 16k samples = 1 s. Spans in centiseconds.
     const N: usize = 16_000 * 10;
-
-    #[test]
-    fn window_selects_offset_and_duration_in_original_samples() {
-        assert_eq!(window(None, None, N), (0, N));
-        assert_eq!(window(Some(2_000), None, N), (32_000, N));
-        assert_eq!(window(Some(2_000), Some(4_000), N), (32_000, 96_000));
-        // clamped to the buffer
-        assert_eq!(window(Some(20_000), Some(1_000), N), (N, N));
-    }
 
     #[test]
     fn build_ranges_bakes_in_the_window_origin() {
