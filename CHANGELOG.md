@@ -6,6 +6,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+- Requires `rustler_precompiled` `~> 0.10.0` (was `~> 0.9.0`). It removes
+  the old NIF file again before it extracts the new one. Version 0.9.0
+  wrote over the file in place, which can crash a process that has the NIF
+  loaded.
+
 ### Fixed
 - `transcribe/3` with `:offset_ms` or `:duration_ms` and no
   `:vad_model_path` detects the language on the window. Before, whisper.cpp
