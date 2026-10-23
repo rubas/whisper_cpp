@@ -17,7 +17,7 @@ whisper-rs = { version = "0.16.0", default-features = false }
 # Direct dependency only for the log hook (`whisper_log_set`/`ggml_log_set`);
 # resolved from the same vendor branch as whisper-rs.
 whisper-rs-sys = "0.15.0"
-parking_lot = "0.12.5"
+parking_lot = "0.13.0"
 anyhow = "1.0.104"
 
 [features]
