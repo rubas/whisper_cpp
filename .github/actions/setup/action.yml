@@ -1,5 +1,5 @@
 name: "Setup whisper_cpp build env"
-description: "System packages, Task, Elixir/OTP, Rust toolchain, sccache, and the mix/cargo/native caches."
+description: "Task, Elixir/OTP, Rust toolchain, sccache, and the mix/cargo/native caches."
 
 inputs:
   elixir-version:
@@ -23,12 +23,8 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Install system packages
-      shell: bash
-      run: |
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq cmake build-essential pkg-config libclang-dev
-
+    # No apt step: the GitHub-hosted Ubuntu image has cmake, gcc, make, pkg-config, and libclang. An apt step only adds
+    # the Ubuntu mirror, which took 17 to 20 minutes on the ubuntu-26.04 image on 2026-10-23.
     - name: Install Task
       uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
       with:
