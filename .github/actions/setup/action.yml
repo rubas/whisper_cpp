@@ -1,5 +1,5 @@
 name: "Setup whisper_cpp build env"
-description: "System packages, Task, Elixir/OTP, Rust toolchain, sccache, and the mix/cargo/native caches."
+description: "Task, Elixir/OTP, Rust toolchain, and the mix/cargo/native caches."
 
 inputs:
   elixir-version:
@@ -23,12 +23,8 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Install system packages
-      shell: bash
-      run: |
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq cmake build-essential pkg-config libclang-dev
-
+    # No apt step: the GitHub-hosted Ubuntu image has cmake, gcc, make, pkg-config, and libclang. An apt step only adds
+    # the Ubuntu mirror, which took 17 to 20 minutes on the ubuntu-26.04 image on 2026-10-23.
     - name: Install Task
       uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
       with:
@@ -47,17 +43,6 @@ runs:
       with:
         toolchain: ${{ inputs.rust-toolchain }}
         components: ${{ inputs.rust-components }}
-
-    - name: Install sccache
-      uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-
-    - name: Enable sccache wrapping
-      shell: bash
-      run: |
-        echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-        echo "CC=sccache cc" >> "$GITHUB_ENV"
-        echo "CXX=sccache c++" >> "$GITHUB_ENV"
 
     - name: Cache Elixir build + deps
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -79,14 +64,21 @@ runs:
         restore-keys: |
           ${{ runner.os }}-cargo-${{ inputs.rust-toolchain }}-
 
+    # bindgen tells cargo to rebuild whisper-rs-sys when a system header changes. A target from another Ubuntu
+    # release names headers that are missing or newer here, so each run rebuilds whisper.cpp and saves nothing.
+    - name: Read the runner image
+      id: image
+      shell: bash
+      run: echo "os=$ImageOS" >> "$GITHUB_OUTPUT"
+
     - name: Cache native build artifacts (Cargo target + CMake)
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           native/whisper_cpp_native/target
-        key: ${{ runner.os }}-native-${{ inputs.rust-toolchain }}-${{ hashFiles('native/whisper_cpp_native/Cargo.lock') }}
+        key: ${{ steps.image.outputs.os }}-native-${{ inputs.rust-toolchain }}-${{ hashFiles('native/whisper_cpp_native/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-native-${{ inputs.rust-toolchain }}-
+          ${{ steps.image.outputs.os }}-native-${{ inputs.rust-toolchain }}-
 
     - name: Cache integration fixtures (models)
       if: ${{ inputs.cache-fixtures == 'true' }}
