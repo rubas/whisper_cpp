@@ -71,14 +71,21 @@ runs:
       shell: bash
       run: echo "os=$ImageOS" >> "$GITHUB_OUTPUT"
 
+    # With GGML_NATIVE=ON, ggml builds for the CPU of the runner that saved the cache. A later runner with an older CPU
+    # restores that build and dies with SIGILL (integration run of 2026-10-26, issue #83). The baseline is the one that
+    # release.yml ships. The key names it, so no target of a native build is restored.
+    - name: Build ggml for the CPU baseline
+      shell: bash
+      run: echo "GGML_NATIVE=OFF" >> "$GITHUB_ENV"
+
     - name: Cache native build artifacts (Cargo target + CMake)
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           native/whisper_cpp_native/target
-        key: ${{ steps.image.outputs.os }}-native-${{ inputs.rust-toolchain }}-${{ hashFiles('native/whisper_cpp_native/Cargo.lock') }}
+        key: ${{ steps.image.outputs.os }}-native-baseline-${{ inputs.rust-toolchain }}-${{ hashFiles('native/whisper_cpp_native/Cargo.lock') }}
         restore-keys: |
-          ${{ steps.image.outputs.os }}-native-${{ inputs.rust-toolchain }}-
+          ${{ steps.image.outputs.os }}-native-baseline-${{ inputs.rust-toolchain }}-
 
     - name: Cache integration fixtures (models)
       if: ${{ inputs.cache-fixtures == 'true' }}

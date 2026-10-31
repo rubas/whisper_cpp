@@ -34,7 +34,8 @@ users never build Rust.
 
 - `release.yml` builds with `GGML_NATIVE=OFF` and the `GGML_CPU_ARM_ARCH` of the matrix. Without them ggml builds for
   the runner CPU, and the NIF can die with SIGILL on an older CPU. The release job fails when `CMakeCache.txt` does not
-  have `GGML_NATIVE:BOOL=OFF`. Local source builds keep the native tuning.
+  have `GGML_NATIVE:BOOL=OFF`. The setup action sets `GGML_NATIVE=OFF` too, because `ci.yml` and `integration.yml`
+  restore a cached build on runners with other CPUs. Local source builds keep the native tuning.
 - `release.yml` reads `nif_versions:` from `lib/whisper_cpp/native.ex` with `sed`. If you reformat that line, the
   release job fails.
 - A new precompiled variant needs an entry in the `@variants` map of `native.ex` and in the `release.yml` build
