@@ -15,6 +15,9 @@ permissions: {}
 concurrency:
   group: release-${{ github.event_name }}-${{ github.ref_name || inputs.tag }}
   cancel-in-progress: false
+  # Keep every pending run. A newer push would otherwise cancel the pending run of a checksum merge,
+  # and only that run publishes.
+  queue: max
 
 env:
   CARGO_TERM_COLOR: always
@@ -355,7 +358,9 @@ jobs:
   tag:
     name: Create release tag
     runs-on: ubuntu-24.04
-    needs: detect
+    # Tag only after every NIF build passes. A failed build then leaves no tag, so the next push to
+    # main releases the same version.
+    needs: [detect, build]
     if: github.event_name == 'push' && needs.detect.outputs.should_release == 'true'
     permissions:
       contents: write # create and push the release tag
