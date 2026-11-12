@@ -58,7 +58,8 @@ users never build Rust.
 4. Regenerate `checksum-Elixir.WhisperCpp.Native.exs` from the published assets with `task checksum:download`, and
    open a PR with it. This keeps the checksum of each tag reproducible from the repo. The task builds the NIF from
    source first, because `mix rustler_precompiled.download` reads the version and the targets from the metadata of the
-   last compile, in a user cache that every checkout shares. It fails when an asset is missing.
+   last compile. The task keeps that metadata in `_build`, where a compile in another checkout cannot change it. It
+   fails when an asset is missing.
 5. Merge the checksum PR. A push to `main` that changes the checksum file, for a version that has its tag, starts the
    `Publish to Hex` job of `release.yml`. It publishes the sources of the tag, which the NIFs were built from, with the
    checksum file of the merge. It compares the file with the release's `SHA256SUMS`, stops when they differ, loads the
