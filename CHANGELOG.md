@@ -4,7 +4,7 @@ All notable changes to `whisper_cpp` will be documented in this file. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.1] - 2026-11-12
 
 ### Changed
 - Requires `rustler_precompiled` `~> 0.10.0` (was `~> 0.9.0`). It removes
