@@ -16,6 +16,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   (issue #26). On Apple Silicon, whisper.cpp 1.9.5 runs the encoder through
   ANEForge when the environment sets `ANEFORGE_ENCODER`; without it,
   nothing changes.
+- The precompiled NIFs are built with Rust 1.99.1 (was 1.98.1), and the
+  `hipblas` variant with ROCm 7.2.4 (was 7.2.3). CI uses Elixir 1.20.5 and
+  OTP 29.1.2. Source builds still need Rust 1.98 or later.
+- Cargo refresh: `smallvec` 1.16.5 is in the NIF, and `cc` 1.11.1 and `log`
+  0.4.35 are build only. `mix.lock` has rustler_precompiled 0.10.1.
 
 ### Fixed
 - An `:abort_handle` now also stops the language auto-detection, which
