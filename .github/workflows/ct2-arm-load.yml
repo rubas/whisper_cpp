@@ -1,0 +1,46 @@
+name: ct2 arm load probe
+
+on:
+  push:
+    branches:
+      - nif-check-harness
+
+permissions: {}
+
+jobs:
+  probe:
+    name: ${{ matrix.runner }} ${{ matrix.version }}
+    runs-on: ${{ matrix.runner }}
+    permissions: {}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04-arm, ubuntu-24.04]
+        version: ["0.7.1", "0.7.0"]
+    steps:
+      - name: dlopen the released NIF with RTLD_NOW
+        env:
+          VERSION: ${{ matrix.version }}
+          TARGET: ${{ runner.arch == 'ARM64' && 'aarch64' || 'x86_64' }}-unknown-linux-gnu
+        run: |
+          FILE="libwhisper_ct2_native-v${VERSION}-nif-2.17-${TARGET}.so"
+          mkdir nif
+          curl -fsSL "https://github.com/rubas/whisper_ct2/releases/download/v${VERSION}/${FILE}.tar.gz" | tar -xz -C nif
+          printf '#include <dlfcn.h>\n#include <stdio.h>\nint main(int c, char **v) { void *h = dlopen(v[1], RTLD_NOW); printf("%%s\\n", h ? "loaded" : dlerror()); return !h; }\n' > dl.c
+          cc -o dl dl.c
+          ./dl "$PWD/nif/$FILE" || true
+
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          elixir-version: "1.20.5"
+          otp-version: "29.1.2"
+
+      - name: Load whisper_ct2 from Hex as a consumer
+        env:
+          VERSION: ${{ matrix.version }}
+        run: |
+          mix new probe
+          cd probe
+          sed -i "s/# {:dep_from_hexpm, \"~> 0.3.0\"},/{:whisper_ct2, \"== ${VERSION}\"},/" mix.exs
+          mix deps.get
+          mix run -e 'IO.inspect(WhisperCt2.Native.available_devices())'
