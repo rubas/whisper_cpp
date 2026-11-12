@@ -381,7 +381,7 @@ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 [[package]]
 name = "whisper-rs"
 version = "0.16.0"
-source = "git+https://github.com/rubas/whisper_cpp.git?rev=9a4232f1e2f1fc93987746cb080c074229673fc7#9a4232f1e2f1fc93987746cb080c074229673fc7"
+source = "git+https://github.com/rubas/whisper_cpp.git?rev=1f3c84e887d9811463ba8fed6459d21a19e000a3#1f3c84e887d9811463ba8fed6459d21a19e000a3"
 dependencies = [
  "libc",
  "whisper-rs-sys",
@@ -390,7 +390,7 @@ dependencies = [
 [[package]]
 name = "whisper-rs-sys"
 version = "0.15.0"
-source = "git+https://github.com/rubas/whisper_cpp.git?rev=9a4232f1e2f1fc93987746cb080c074229673fc7#9a4232f1e2f1fc93987746cb080c074229673fc7"
+source = "git+https://github.com/rubas/whisper_cpp.git?rev=1f3c84e887d9811463ba8fed6459d21a19e000a3#1f3c84e887d9811463ba8fed6459d21a19e000a3"
 dependencies = [
  "bindgen",
  "cfg-if",
