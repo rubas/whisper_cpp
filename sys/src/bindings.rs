@@ -840,7 +840,7 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn snprintf(
         __s: *mut ::std::os::raw::c_char,
-        __maxlen: ::std::os::raw::c_ulong,
+        __maxlen: u64,
         __format: *const ::std::os::raw::c_char,
         ...
     ) -> ::std::os::raw::c_int;
@@ -848,7 +848,7 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn vsnprintf(
         __s: *mut ::std::os::raw::c_char,
-        __maxlen: ::std::os::raw::c_ulong,
+        __maxlen: u64,
         __format: *const ::std::os::raw::c_char,
         __arg: *mut __va_list_tag,
     ) -> ::std::os::raw::c_int;
@@ -1059,18 +1059,18 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn fread(
         __ptr: *mut ::std::os::raw::c_void,
-        __size: ::std::os::raw::c_ulong,
-        __n: ::std::os::raw::c_ulong,
+        __size: u64,
+        __n: u64,
         __stream: *mut FILE,
-    ) -> ::std::os::raw::c_ulong;
+    ) -> u64;
 }
 unsafe extern "C" {
     pub fn fwrite(
         __ptr: *const ::std::os::raw::c_void,
-        __size: ::std::os::raw::c_ulong,
-        __n: ::std::os::raw::c_ulong,
+        __size: u64,
+        __n: u64,
         __s: *mut FILE,
-    ) -> ::std::os::raw::c_ulong;
+    ) -> u64;
 }
 unsafe extern "C" {
     pub fn fread_unlocked(
@@ -1283,8 +1283,13 @@ pub const ggml_type_GGML_TYPE_Q1_0: ggml_type = 41;
 pub const ggml_type_GGML_TYPE_Q2_0: ggml_type = 42;
 pub const ggml_type_GGML_TYPE_COUNT: ggml_type = 43;
 pub type ggml_type = ::std::os::raw::c_uint;
+pub const ggml_prec_GGML_PREC_UNDEFINED: ggml_prec = 0;
 pub const ggml_prec_GGML_PREC_DEFAULT: ggml_prec = 0;
 pub const ggml_prec_GGML_PREC_F32: ggml_prec = 10;
+pub const ggml_prec_GGML_PREC_BF16: ggml_prec = 15;
+pub const ggml_prec_GGML_PREC_F16: ggml_prec = 20;
+pub const ggml_prec_GGML_PREC_Q8: ggml_prec = 30;
+pub const ggml_prec_GGML_PREC_Q4: ggml_prec = 40;
 pub type ggml_prec = ::std::os::raw::c_uint;
 pub const ggml_op_hint_GGML_HINT_NONE: ggml_op_hint = 0;
 pub const ggml_op_hint_GGML_HINT_SRC0_IS_HADAMARD: ggml_op_hint = 1;
@@ -2346,6 +2351,16 @@ unsafe extern "C" {
         b: *mut ggml_tensor,
         eps: f32,
     ) -> *mut ggml_tensor;
+}
+unsafe extern "C" {
+    pub fn ggml_prec_set_acc(a: *mut ggml_tensor, prec: ggml_prec) -> bool;
+}
+unsafe extern "C" {
+    pub fn ggml_prec_set_src(
+        a: *mut ggml_tensor,
+        prec: ggml_prec,
+        idx: ::std::os::raw::c_int,
+    ) -> bool;
 }
 unsafe extern "C" {
     pub fn ggml_mul_mat(
@@ -3496,6 +3511,14 @@ unsafe extern "C" {
     ) -> *mut ggml_tensor;
 }
 unsafe extern "C" {
+    pub fn ggml_dsv4_hc_pre_gated(
+        ctx: *mut ggml_context,
+        x: *mut ggml_tensor,
+        gate: *mut ggml_tensor,
+        scale: f32,
+    ) -> *mut ggml_tensor;
+}
+unsafe extern "C" {
     pub fn ggml_dsv4_hc_post(
         ctx: *mut ggml_context,
         x: *mut ggml_tensor,
@@ -4027,6 +4050,13 @@ unsafe extern "C" {
     ) -> ggml_backend_buffer_t;
 }
 unsafe extern "C" {
+    pub fn ggml_backend_buft_alloc_buffer_n(
+        buft: ggml_backend_buffer_type_t,
+        tensors: *mut *mut ggml_tensor,
+        n_tensors: ::std::os::raw::c_int,
+    ) -> ggml_backend_buffer_t;
+}
+unsafe extern "C" {
     pub fn ggml_backend_buft_get_alignment(buft: ggml_backend_buffer_type_t) -> usize;
 }
 unsafe extern "C" {
@@ -4036,6 +4066,13 @@ unsafe extern "C" {
     pub fn ggml_backend_buft_get_alloc_size(
         buft: ggml_backend_buffer_type_t,
         tensor: *const ggml_tensor,
+    ) -> usize;
+}
+unsafe extern "C" {
+    pub fn ggml_backend_buft_get_alloc_size_n(
+        buft: ggml_backend_buffer_type_t,
+        tensors: *mut *mut ggml_tensor,
+        n_tensors: ::std::os::raw::c_int,
     ) -> usize;
 }
 unsafe extern "C" {
