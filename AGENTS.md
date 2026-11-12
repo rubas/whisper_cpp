@@ -49,26 +49,31 @@ users never build Rust.
 
 1. Bump `@version` in `mix.exs`, add the `CHANGELOG.md` entry, and push to `main`.
 2. On each push to `main`, `release.yml` releases when no tag exists for the `mix.exs` version. It builds a tarball per
-   target and variant, creates the tag, and uploads the tarballs and `SHA256SUMS`. If a run stops before it creates the
-   tag, the next push retries the release.
+   target and variant, creates the tag, and uploads the tarballs and `SHA256SUMS`. A build fails when its NIF needs a
+   symbol that no library defines, because the BEAM could not load it. If a run stops before it creates the tag, the
+   next push retries the release.
 3. After the tag exists, a manual dispatch builds the tag's commit. It fails when the tag is missing or its `mix.exs`
    version differs, and it uploads only the assets the release does not have yet. It never replaces a published
    tarball, because a new tarball breaks the checksum file in the Hex package.
-4. Regenerate `checksum-Elixir.WhisperCpp.Native.exs` from the published assets, and open a PR with it. This keeps
-   the checksum of each tag reproducible from the repo:
-
-   ```bash
-   mix rustler_precompiled.download WhisperCpp.Native --all --no-config --ignore-unavailable --print
-   ```
-
+4. Regenerate `checksum-Elixir.WhisperCpp.Native.exs` from the published assets with `task checksum:download`, and
+   open a PR with it. This keeps the checksum of each tag reproducible from the repo. The task builds the NIF from
+   source first, because `mix rustler_precompiled.download` reads the version and the targets from the metadata of the
+   last compile. The task keeps that metadata in `_build`, where a compile in another checkout cannot change it. It
+   fails when an asset is missing.
 5. Merge the checksum PR. A push to `main` that changes the checksum file, for a version that has its tag, starts the
-   `Publish to Hex` job of `release.yml`. It compares the file with the release's `SHA256SUMS`, stops when they differ,
-   and runs `mix hex.publish --yes` in the GitHub environment `hex`, which only `main` can use. The job keeps no Hex
-   key: the package has a workload identity on hex.pm for `rubas/whisper_cpp`, workflow `release.yml`, environment
-   `hex`, and Hex trades the job's OIDC token for a short token that can only publish `whisper_cpp`.
+   `Publish to Hex` job of `release.yml`. It publishes the sources of the tag, which the NIFs were built from, with the
+   checksum file of the merge. It compares the file with the release's `SHA256SUMS`, stops when they differ, loads the
+   precompiled NIF of its runner, and runs `mix hex.publish --yes` in the GitHub environment `hex`, which only `main`
+   can use. The job keeps no Hex key: the package has a workload identity on hex.pm for `rubas/whisper_cpp`, workflow
+   `release.yml`, environment `hex`, and Hex trades the job's OIDC token for a short token that can only publish
+   `whisper_cpp`.
 6. The package has staged publishing on. The job ends with `Package staged for approval at <url>`, and an owner
-   approves the release on hex.pm with their 2FA within 7 days. A failed docs upload prints `Publishing failed` but
-   leaves the job green, so read the end of its log. When the job fails, fix the cause and re-run it.
+   approves the release on hex.pm with their 2FA within 7 days. The job fails when the log says `Publishing failed` or
+   `Publishing docs failed`, because `mix hex.publish` exits 0 when only the docs upload fails.
+7. When the job fails for a cause outside the repo, such as hex.pm or the workload identity, fix it and re-run the job.
+   It publishes the same tag. A cause in the tag needs a new patch version. A re-run keeps the workflow file of its run,
+   so after a fix of the job itself, release a new patch version, or a package owner runs `mix hex.publish` from the
+   tag with the checksum file of the merge.
 
-Merge nothing else to `main` between the version bump and the checksum PR, or the package holds sources that the NIFs
-were not built from. Hex versions are immutable, so change the checksum file only in the checksum PR of a release.
+A change that merges between the version bump and the checksum PR ships only with the next version. Hex versions are
+immutable, so change the checksum file only in the checksum PR of a release.
