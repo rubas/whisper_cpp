@@ -6,7 +6,7 @@ users never build Rust.
 ## Checks
 
 - `ci.yml` runs `task check` on pushes to `main` and on pull requests. A push to a branch without a pull request runs
-  nothing.
+  nothing. `ci.yml` and `integration.yml` set `WHISPER_CPP_BUILD=1`, so they test the NIF of the code under test.
 - `task test:integration` runs real inference. `integration.yml` runs it weekly and on manual dispatch, never on a pull
   request. Run it locally when you change the NIF boundary.
 - `release.yml` builds six NIFs (target and variant). One backend takes minutes to build from source, so leave the
@@ -54,11 +54,21 @@ users never build Rust.
 3. After the tag exists, a manual dispatch builds the tag's commit. It fails when the tag is missing or its `mix.exs`
    version differs, and it uploads only the assets the release does not have yet. It never replaces a published
    tarball, because a new tarball breaks the checksum file in the Hex package.
-4. Regenerate `checksum-Elixir.WhisperCpp.Native.exs` from the published assets, then commit and push it. This keeps
+4. Regenerate `checksum-Elixir.WhisperCpp.Native.exs` from the published assets, and open a PR with it. This keeps
    the checksum of each tag reproducible from the repo:
 
    ```bash
    mix rustler_precompiled.download WhisperCpp.Native --all --no-config --ignore-unavailable --print
    ```
 
-5. Run `mix hex.publish` from a clean tree. `mix.exs` puts `checksum-*.exs` in the Hex tarball.
+5. Merge the checksum PR. A push to `main` that changes the checksum file, for a version that has its tag, starts the
+   `Publish to Hex` job of `release.yml`. It compares the file with the release's `SHA256SUMS`, stops when they differ,
+   and runs `mix hex.publish --yes` in the GitHub environment `hex`, which only `main` can use. The job keeps no Hex
+   key: the package has a workload identity on hex.pm for `rubas/whisper_cpp`, workflow `release.yml`, environment
+   `hex`, and Hex trades the job's OIDC token for a short token that can only publish `whisper_cpp`.
+6. The package has staged publishing on. The job ends with `Package staged for approval at <url>`, and an owner
+   approves the release on hex.pm with their 2FA within 7 days. A failed docs upload prints `Publishing failed` but
+   leaves the job green, so read the end of its log. When the job fails, fix the cause and re-run it.
+
+Merge nothing else to `main` between the version bump and the checksum PR, or the package holds sources that the NIFs
+were not built from. Hex versions are immutable, so change the checksum file only in the checksum PR of a release.

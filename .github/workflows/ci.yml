@@ -13,6 +13,8 @@ concurrency:
 
 env:
   MIX_ENV: test
+  # Build the NIF from source: no release has the precompiled NIF of the code under test.
+  WHISPER_CPP_BUILD: "1"
   ELIXIR_VERSION: "1.20.5"
   OTP_VERSION: "29.1.2"
   RUST_TOOLCHAIN: "1.99.1"
