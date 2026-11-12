@@ -23,7 +23,7 @@ users never build Rust.
 - Credo enables `Readability.Specs`, so a public function without a `@spec` fails. `Readability.ModuleDoc` is off, but
   every public module still gets a `@moduledoc`; no check catches a missing one.
 - `whisper-rs` and `whisper-rs-sys` come from a `[patch.crates-io]` pin to the `vendor/whisper-rs-0.16.0-patched`
-  branch of this repo. It adds the callback and CString-leak fixes and moves whisper.cpp to v1.9.4. On a `whisper-rs`
+  branch of this repo. It adds the callback and CString-leak fixes and moves whisper.cpp to v1.9.5. On a `whisper-rs`
   version bump, check the patch again (issue #26).
 - `WHISPER_CPP_FEATURES` picks the cargo feature, and `WHISPER_CPP_BUILD=1` forces a source build. A change to either,
   or to `WHISPER_CPP_VARIANT`, recompiles the NIF wrapper. The `build:*` tasks set them only for their own run, so a

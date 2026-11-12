@@ -11,6 +11,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the old NIF file again before it extracts the new one. Version 0.9.0
   wrote over the file in place, which can crash a process that has the NIF
   loaded.
+- Vendored whisper.cpp 1.9.4 -> 1.9.5, with ggml 0.26.0, through the same
+  vendor branch of this repo. whisper-rs stays at the patched 0.16.0
+  (issue #26). On Apple Silicon, whisper.cpp 1.9.5 runs the encoder through
+  ANEForge when the environment sets `ANEFORGE_ENCODER`; without it,
+  nothing changes.
 - The precompiled NIFs are built with Rust 1.99.1 (was 1.98.1), and the
   `hipblas` variant with ROCm 7.2.4 (was 7.2.3). CI uses Elixir 1.20.5 and
   OTP 29.1.2. Source builds still need Rust 1.98 or later.
@@ -18,6 +23,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   0.4.35 are build only. `mix.lock` has rustler_precompiled 0.10.1.
 
 ### Fixed
+- An `:abort_handle` now also stops the language auto-detection, which
+  runs before the transcription (ggml-org/whisper.cpp#4077). Before, an
+  abort waited for the detection pass to finish.
+- `load_model/2` rejects a model file with an invalid tensor type, and a
+  `:vad_model_path` with an encoder layer count other than 4, instead of
+  reading out of bounds (ggml-org/whisper.cpp#4091, ggml-org/whisper.cpp#4064).
 - `transcribe/3` with `:offset_ms` or `:duration_ms` and no
   `:vad_model_path` detects the language on the window. Before, whisper.cpp
   detected it on the first 30 s of the whole buffer, so the window could
